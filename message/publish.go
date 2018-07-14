@@ -10,6 +10,8 @@ type Publish struct {
 	TopicName string
 	MessageID uint16
 	Body      string
+
+	ClientId string
 }
 
 func ParsePublish(f *Frame, p []byte) (*Publish, error) {

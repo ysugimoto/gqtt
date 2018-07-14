@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"bufio"
 	"context"
 	"log"
 	"net"
@@ -10,11 +11,16 @@ import (
 	"time"
 )
 
-func formatTopicPath(path string) string {
-	return "/" + strings.Trim(path, "/")
-}
+type ConnectionState uint8
+
+const (
+	CONNECTING ConnectionState = iota
+	CONNECTED
+	CLOSED
+)
 
 type Client struct {
+	State   ConnectionState
 	ctx     context.Context
 	conn    net.Conn
 	id      string
@@ -24,35 +30,28 @@ type Client struct {
 	mu     sync.Mutex
 	once   sync.Once
 
-	send chan []byte
+	send   chan []byte
+	writer *bufio.Writer
 }
 
 func NewClient(conn net.Conn, ctx context.Context, id string) *Client {
 	return &Client{
-		ctx:    ctx,
+		State:  CONNECTING,
+		ctx:    c,
 		id:     id,
 		conn:   conn,
 		topics: make(map[string]uint8),
 	}
 }
 
-func (c *Client) loop() {
-	for {
-		select {
-		case <-c.ctx.Done():
-			c.Close()
-		case b := <-c.send:
-			c.write(b)
-		}
-	}
-}
-
-func (c *Client) write(b []byte) {
+func (c *Client) Read(b []byte) (int, error) {
+	return c.conn.Read(b)
 }
 
 func (c *Client) Close() {
 	c.once.Do(func() {
 		c.conn.Close()
+		c.State = CLOSED
 	})
 }
 
@@ -61,7 +60,39 @@ func (c *Client) Id() string {
 }
 
 func (c *Client) Send(m []byte) {
+	if c.writer == nil {
+		go c.writeLoop()
+	}
 	c.send <- m
+}
+
+func (c *Client) writeLoop() {
+	c.writer = bufio.NewWriter(c.conn)
+	for {
+		select {
+		case <-c.ctx.Done():
+			c.Close()
+			return
+		case buf := <-c.send:
+			if _, err := c.writer.Write(buf); err != nil {
+				log.Printf("socket write error: %s", err.Error())
+				// Backoff when error is temporary net error
+				if ne, ok := err.(net.Error); ok {
+					if ne.Temporary() {
+						log.Printf("socket error is temporary, backoff")
+						time.Sleep(10 * time.Millisecond)
+						c.send <- buf
+						break
+					}
+				}
+				return
+			}
+			if err := c.writer.Flush(); err != nil {
+				log.Printf("writer flush error: %s", err.Error())
+				return
+			}
+		}
+	}
 }
 
 func (c *Client) Sendable(topicName string) bool {

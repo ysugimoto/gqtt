@@ -9,6 +9,8 @@ type Unsubscribe struct {
 
 	MessageID uint16
 	Topics    []string
+
+	ClientId string
 }
 
 func ParseUnsubscribe(f *Frame, p []byte) (*Unsubscribe, error) {

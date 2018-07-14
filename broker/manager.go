@@ -12,13 +12,13 @@ type Manager struct {
 	clients map[string]*Client
 	ctx     context.Context
 
-	connect    chan *Client
+	subscribe   chan *message.Subscribe
+	unsubscribe chan *message.Unsubscribe
+	publish     chan *message.Publish
+
+	ping       chan *Client
 	disconnect chan *Client
-
-	subscribe   chan *Topic
-	unsubscribe chan *Topic
-
-	ping chan *Client
+	connect    chan *Client
 
 	mu sync.Mutex
 }
@@ -28,17 +28,19 @@ func initManager(ctx context.Context) *Manager {
 		clients: make(map[string]*Client),
 		ctx:     ctx,
 
-		connect:    make(chan *Client),
+		subscribe:   make(chan *message.Subscribe),
+		unsubscribe: make(chan *message.Unsubscribe),
+		publish:     make(chan *message.Publish),
+
+		ping:       make(chan *Client),
 		disconnect: make(chan *Client),
-
-		subscribe:   make(chan *Topic),
-		unsubscribe: make(chan *Topic),
-
-		ping: make(chan *Client),
+		connect:    make(chan *Client),
 	}
 	go func() {
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case c := <-m.connect:
 				log.Printf("handle connect Client: %s", c.Id())
 				m.handleConnect(c)
@@ -53,6 +55,9 @@ func initManager(ctx context.Context) *Manager {
 				log.Printf("handle unsubscribe Client: %+v", t.Names())
 				m.handleUnsubscribe(t)
 
+			case pb := <-m.publish:
+				log.Printf("handle publish from Client: %+v", pb)
+
 			case c := <-m.ping:
 				log.Printf("handle ping Client: %s", c.Id())
 				m.handlePing(c)
@@ -62,7 +67,7 @@ func initManager(ctx context.Context) *Manager {
 	return m
 }
 
-func (m *Manager) publish(sender string, pb *message.Publish) error {
+func (m *Manager) publishMessage(sender string, pb *message.Publish) error {
 	buf, err := pb.Encode()
 	if err != nil {
 		return err

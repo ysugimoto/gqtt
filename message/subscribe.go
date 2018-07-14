@@ -14,6 +14,8 @@ type Subscribe struct {
 
 	MessageID uint16
 	Topics    []SubscribeTopic
+
+	ClientId string
 }
 
 func ParseSubscribe(f *Frame, p []byte) (*Subscribe, error) {
