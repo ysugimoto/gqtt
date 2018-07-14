@@ -1,0 +1,44 @@
+package broker_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/ysugimoto/gqtt/broker"
+)
+
+func TestTopicFindOrCreate(t *testing.T) {
+	topic := broker.NewTopicTree("/")
+
+	c := topic.FindOrCreate([]string{"foo", "bar", "baz"})
+	assert.NotNil(t, c)
+	ch := topic.Children["foo"]
+	assert.NotNil(t, ch)
+	ch = ch.Children["bar"]
+	assert.NotNil(t, ch)
+	ch = ch.Children["baz"]
+	assert.Exactly(t, ch, c)
+}
+
+func TestTopicFind(t *testing.T) {
+	topic := broker.NewTopicTree("/")
+	topic.Children["foo"] = broker.NewTopicTree("foo")
+
+	c := topic.Find([]string{"foo"})
+	assert.NotNil(t, c)
+	c = topic.Find([]string{"bar"})
+	assert.Nil(t, c)
+}
+
+func TestTopicSubscribeUnsubscribe(t *testing.T) {
+	topic := broker.NewTopicTree("/")
+	topic.Subscribe("aaaaa")
+	topic.Subscribe("bbbbb")
+	topic.Subscribe("ccccc")
+	assert.Equal(t, topic.Clients(), []string{"aaaaa", "bbbbb", "ccccc"})
+
+	topic.Unsubscribe("bbbbb")
+	assert.Equal(t, topic.Clients(), []string{"aaaaa", "ccccc"})
+	topic.Unsubscribe("ddddd")
+	assert.Equal(t, topic.Clients(), []string{"aaaaa", "ccccc"})
+}
