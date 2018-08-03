@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/ysugimoto/gqtt/message"
+	"github.com/ysugimoto/gqtt/messages"
 )
 
 type Manager struct {

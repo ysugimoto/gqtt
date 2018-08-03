@@ -1,7 +1,6 @@
 package broker
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -10,7 +9,7 @@ import (
 	"time"
 
 	"github.com/satori/go.uuid"
-	"github.com/ysugimoto/gqtt/message"
+	"github.com/ysugimoto/gqtt/messages"
 )
 
 func formatTopicPath(path string) string {

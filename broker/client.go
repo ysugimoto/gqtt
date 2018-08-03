@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ysugimoto/gqtt/message"
+	"github.com/ysugimoto/gqtt/messages"
+	v3 "github.com/ysugimoto/gqtt/messages/v3"
+	v5 "github.com/ysugimoto/gqtt/messages/v5"
 )
 
 type ConnectionState uint8
@@ -35,7 +37,8 @@ type Client struct {
 	send   chan []byte
 	writer *bufio.Writer
 
-	info message.Connection
+	infoV3 v3.Connection
+	infoV5 v5.Connection
 }
 
 func NewClient(conn net.Conn, ctx context.Context, id string) *Client {
@@ -49,7 +52,7 @@ func NewClient(conn net.Conn, ctx context.Context, id string) *Client {
 }
 
 func (c *Client) Handshake(timeout time.Duration) error {
-	f, p, err := message.ReceiveFrame(c.conn)
+	f, p, err := messages.ReceiveFrame(c.conn)
 	if err != nil {
 		log.Println("receive frame error: ", err)
 		return err
