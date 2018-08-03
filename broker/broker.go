@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/satori/go.uuid"
-	"github.com/ysugimoto/gqtt/messages"
+	"github.com/ysugimoto/gqtt/message"
 )
 
 func formatTopicPath(path string) string {
