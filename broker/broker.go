@@ -110,34 +110,3 @@ func (b *Broker) Run(ctx context.Context) error {
 		}(s)
 	}
 }
-
-func handshake(s net.Conn) error {
-	f, p, err := message.ReceiveFrame(s)
-	if err != nil {
-		log.Println("receive frame error: ", err)
-		return err
-	}
-	c, err := message.ParseConnect(f, p)
-	if err != nil {
-		log.Println("frame expects connect package: ", err)
-		return err
-	}
-	log.Printf("CONNECT accepted: %+v\n", c)
-	w := bufio.NewWriter(s)
-	ack := message.NewConnAck(&message.Frame{
-		Type: message.CONNACK,
-	})
-	if buf, err := ack.Encode(); err != nil {
-		log.Println("CONNACK encode error: ", err)
-		return err
-	} else if _, err := w.Write(buf); err != nil {
-		log.Println("CONNACK write error: ", err)
-		return err
-	}
-	if err := w.Flush(); err != nil {
-		log.Println("CONNACK flush error: ", err)
-		return err
-	}
-
-	return nil
-}

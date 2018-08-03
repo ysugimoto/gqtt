@@ -18,7 +18,7 @@ func encodeString(str string) []byte {
 	buf := []byte(str)
 	size := len(buf)
 
-	return append(encodeInt16(size), buf...)
+	return append(encodeInt(size), buf...)
 }
 
 func decodeString(buffer []byte, start int) (string, int) {

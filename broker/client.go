@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ysugimoto/gqtt/message"
 )
 
 type ConnectionState uint8
@@ -32,6 +34,8 @@ type Client struct {
 
 	send   chan []byte
 	writer *bufio.Writer
+
+	info message.Connection
 }
 
 func NewClient(conn net.Conn, ctx context.Context, id string) *Client {
@@ -42,6 +46,35 @@ func NewClient(conn net.Conn, ctx context.Context, id string) *Client {
 		conn:   conn,
 		topics: make(map[string]uint8),
 	}
+}
+
+func (c *Client) Handshake(timeout time.Duration) error {
+	f, p, err := message.ReceiveFrame(c.conn)
+	if err != nil {
+		log.Println("receive frame error: ", err)
+		return err
+	}
+	cn, err := message.ParseConnect(f, p)
+	if err != nil {
+		log.Println("frame expects connect package: ", err)
+		return err
+	}
+	c.info = *cn
+	log.Printf("CONNECT accepted: %+v\n", c)
+
+	w := bufio.NewWriter(s)
+	ack := message.NewConnAck(&message.Frame{
+		Type: message.CONNACK,
+	})
+	if buf, err := ack.Encode(); err != nil {
+		log.Println("CONNACK encode error: ", err)
+		return err
+	} else if _, err := c.Send(buf); err != nil {
+		log.Println("CONNACK write error: ", err)
+		return err
+	}
+
+	return nil
 }
 
 func (c *Client) Read(b []byte) (int, error) {
