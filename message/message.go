@@ -1,93 +1,150 @@
 package message
 
-import (
-	"bufio"
-	"io"
+type (
+	MessageType  uint8
+	PropertyType uint8
+	ReasonCode   uint8
 )
 
-type Frame struct {
-	Type   MessageType
-	DUP    bool
-	QoS    uint8
-	RETAIN bool
-	Size   uint64
+const (
+	QoS0 uint8 = iota
+	QoS1
+	QoS2
+)
+
+const (
+	_ MessageType = iota
+	CONNECT
+	CONNACK
+	PUBLISH
+	PUBACK
+	PUBREC
+	PUBREL
+	PUBCOMP
+	SUBSCRIBE
+	SUBACK
+	UNSUBSCRIBE
+	UNSUBACK
+	PINGREQ
+	PINGRESP
+	DISCONNECT
+	AUTH
+)
+
+const (
+	PayloadFormatIndicator         PropertyType = 0x01
+	MessageExpiryInterval          PropertyType = 0x02
+	ContentType                    PropertyType = 0x03
+	ResponseTopic                  PropertyType = 0x08
+	CorrelationData                PropertyType = 0x09
+	SubscriptionIdentifier         PropertyType = 0x0B
+	SessionExpiryInterval          PropertyType = 0x11
+	AssignedClientIdentifier       PropertyType = 0x12
+	ServerKeepAlive                PropertyType = 0x13
+	AuthenticationMethod           PropertyType = 0x15
+	AuthenticationData             PropertyType = 0x16
+	RequestProblemInformation      PropertyType = 0x17
+	WillDelayInterval              PropertyType = 0x18
+	RequestResponseInformation     PropertyType = 0x19
+	ResponseInformation            PropertyType = 0x1A
+	ServerReference                PropertyType = 0x1C
+	ReasonString                   PropertyType = 0x1F
+	ReceiveMaximum                 PropertyType = 0x21
+	TopicAliasMaximum              PropertyType = 0x22
+	TopicAlias                     PropertyType = 0x23
+	MaximumQoS                     PropertyType = 0x24
+	RetainAvalilable               PropertyType = 0x25
+	UserProperty                   PropertyType = 0x26
+	MaximumPacketSize              PropertyType = 0x27
+	WildcardSubscriptionAvailable  PropertyType = 0x28
+	SubscrptionIdentifierAvailable PropertyType = 0x29
+	SharedSubscriptionsAvaliable   PropertyType = 0x2A
+)
+
+const (
+	Success                             ReasonCode = 0x00
+	NotmalDisconnection                 ReasonCode = 0x00
+	GrantedQoS0                         ReasonCode = 0x00
+	GrantedQoS1                         ReasonCode = 0x01
+	GrantedQoS2                         ReasonCode = 0x02
+	DisconnectWithWillMessage           ReasonCode = 0x04
+	NoMatchingSubscribers               ReasonCode = 0x10
+	NoSubscriptionExisted               ReasonCode = 0x11
+	ContinueAuthentication              ReasonCode = 0x18
+	ReAuthenticate                      ReasonCode = 0x19
+	UnspecifiedError                    ReasonCode = 0x80
+	MalformedPacket                     ReasonCode = 0x81
+	ProtocolError                       ReasonCode = 0x82
+	ImplementationSpecificError         ReasonCode = 0x83
+	UnsupportedProtocolVersion          ReasonCode = 0x84
+	ClientIdentifierNotValid            ReasonCode = 0x85
+	BadUsernameOrPassword               ReasonCode = 0x86
+	NotAuthorized                       ReasonCode = 0x87
+	ServerUnavailable                   ReasonCode = 0x88
+	ServerBusy                          ReasonCode = 0x89
+	Banned                              ReasonCode = 0x8A
+	ServerShuttingDown                  ReasonCode = 0x8B
+	BadAuthenticationMethod             ReasonCode = 0x8C
+	KeepAliveTimeout                    ReasonCode = 0x8D
+	SessionTakenOver                    ReasonCode = 0x8E
+	TopicFilterInvalid                  ReasonCode = 0x8F
+	TopicNameInvalid                    ReasonCode = 0x90
+	PacketIdentifierInUse               ReasonCode = 0x91
+	PacketIdentifierNotFound            ReasonCode = 0x92
+	ReceiveMaximumExceeded              ReasonCode = 0x93
+	TopicAliasInvalid                   ReasonCode = 0x94
+	PacketTooLarge                      ReasonCode = 0x95
+	MessageRateTooHigh                  ReasonCode = 0x96
+	QuotaExceeded                       ReasonCode = 0x97
+	AdministrativeAction                ReasonCode = 0x98
+	PayloadFormatInvalid                ReasonCode = 0x99
+	RetianlNotSupported                 ReasonCode = 0x9A
+	QoSNotSupported                     ReasonCode = 0x9B
+	UseAnotherServer                    ReasonCode = 0x9C
+	ServerMoved                         ReasonCode = 0x9D
+	SharedSubscriptionsNotSupported     ReasonCode = 0x9E
+	ConnectionRateExceeded              ReasonCode = 0x9F
+	MaximumConnectionTime               ReasonCode = 0xA0
+	SubscriptionIdentifiersNotSupported ReasonCode = 0xA1
+	WildcardSubscriptionsNotSupported   ReasonCode = 0xA2
+)
+
+func IsMessageTypeAvailable(v uint8) bool {
+	if v > 0 && v < 16 {
+		return true
+	}
+	return false
 }
 
-func (f *Frame) Encode(payload []byte) []byte {
-	header := []byte{byte(int(f.Type<<4) | EncodeBool(f.DUP)<<3 | int(f.QoS)<<1 | EncodeBool(f.RETAIN))}
-
-	size := len(payload)
-	if size == 0 {
-		header = append(header, 0)
-	} else {
-		for size > 0 {
-			digit := size % 0x80
-			size /= 0x80
-			if size > 0 {
-				digit |= 0x80
-			}
-			header = append(header, byte(digit))
-		}
-	}
-
-	return append(header, payload...)
+func (p PropertyType) Byte() byte {
+	return byte(p)
 }
 
-func (f *Frame) Duplicate() {
-	f.DUP = true
+func isPropertyTypeAvailable(v uint8) bool {
+	if (v >= 0x01 && v <= 0x03) ||
+		(v >= 0x08 && v <= 0x09) ||
+		v == 0x0B ||
+		(v >= 0x11 && v <= 0x13) ||
+		(v >= 0x15 && v <= 0x1A) ||
+		v == 0x1C ||
+		v == 0x1F ||
+		(v >= 0x21 && v <= 0x2A) {
+		return true
+	}
+	return false
 }
 
-func toBool(i int) (b bool) {
-	if i > 0 {
-		b = true
-	}
-	return
+func (r ReasonCode) Byte() byte {
+	return byte(r)
 }
 
-func fromBool(b bool) (i int) {
-	if b {
-		i = 1
+func IsReasonCodeAvailable(v uint8) bool {
+	if (v >= 0x00 && v <= 0x02) ||
+		v == 0x04 ||
+		(v >= 0x10 && v <= 0x11) ||
+		(v >= 0x18 && v <= 0x19) ||
+		(v >= 0x80 && v <= 0xA2) {
+		return true
 	}
-	return
-}
-
-func ReceiveFrame(r io.Reader) (*Frame, []byte, error) {
-	var packet byte
-	var err error
-	var size uint64
-
-	reader := bufio.NewReader(r)
-
-	// Read and extract first byte
-	packet, err = reader.ReadByte()
-	if err != nil {
-		return nil, nil, err
-	}
-	b := int(packet)
-	f := &Frame{
-		Type:   MessageType((b >> 4) & 0x0F),
-		DUP:    toBool(((b >> 3) & 0x01)),
-		QoS:    uint8(((b >> 1) & 0x03)),
-		RETAIN: toBool((b & 0x01)),
-	}
-
-	// Read variable remain length
-	var mul uint64 = 1
-	for {
-		if packet, err = reader.ReadByte(); err != nil {
-			return nil, nil, err
-		}
-		size += uint64(packet&0x7F) * mul
-		mul *= 0x80
-		if packet&0x80 == 0 {
-			break
-		}
-	}
-	f.Size = size
-	payload := make([]byte, size)
-	// There are case that length is zero on PINGREQ, PINGRESP
-	if _, err = reader.Read(payload); err != nil {
-		return f, nil, err
-	}
-	return f, payload, nil
+	return false
 }
