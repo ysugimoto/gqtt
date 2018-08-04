@@ -59,9 +59,9 @@ func ParsePublish(f *Frame, p []byte) (*Publish, error) {
 	return pb, nil
 }
 
-func NewPublish() *Publish {
+func NewPublish(opts ...option) *Publish {
 	return &Publish{
-		Frame: newFrame(PUBLISH),
+		Frame: newFrame(PUBLISH, opts...),
 	}
 }
 

@@ -4,10 +4,11 @@ type (
 	MessageType  uint8
 	PropertyType uint8
 	ReasonCode   uint8
+	QoS          uint8
 )
 
 const (
-	QoS0 uint8 = iota
+	QoS0 QoS = iota
 	QoS1
 	QoS2
 )
@@ -108,6 +109,13 @@ const (
 	SubscriptionIdentifiersNotSupported ReasonCode = 0xA1
 	WildcardSubscriptionsNotSupported   ReasonCode = 0xA2
 )
+
+func IsQoSAvaliable(v uint8) bool {
+	if v >= 0 && v <= 2 {
+		return true
+	}
+	return false
+}
 
 func IsMessageTypeAvailable(v uint8) bool {
 	if v > 0 && v < 16 {

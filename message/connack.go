@@ -80,9 +80,9 @@ func ParseConnAck(f *Frame, p []byte) (*ConnAck, error) {
 	return c, nil
 }
 
-func NewConnAck(code ReasonCode) *ConnAck {
+func NewConnAck(code ReasonCode, opts ...option) *ConnAck {
 	return &ConnAck{
-		Frame:      newFrame(CONNACK),
+		Frame:      newFrame(CONNACK, opts...),
 		ReasonCode: code,
 	}
 }

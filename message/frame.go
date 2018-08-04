@@ -2,6 +2,7 @@ package message
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 )
 
@@ -28,20 +29,25 @@ func newFrame(mt MessageType, options ...option) *Frame {
 	return f
 }
 
-func (f *Frame) Encode(payload []byte) []byte {
-	header := []byte{byte(int(f.Type<<4) | encodeBool(f.DUP)<<3 | int(f.QoS)<<1 | encodeBool(f.RETAIN))}
-	size := len(payload)
-	if size == 0 {
-		header = append(header, 0)
-	} else {
-		header = append(header, encodeVariable(size)...)
-	}
-
-	return append(header, payload...)
+func (f *Frame) SetQoS(qos QoS) {
+	f.QoS = uint8(qos)
 }
-
+func (f *Frame) SetRetain(retain bool) {
+	f.RETAIN = retain
+}
 func (f *Frame) Duplicate() {
 	f.DUP = true
+}
+
+func (f *Frame) Encode(payload []byte) []byte {
+	header := []byte{byte(int(f.Type<<4) | encodeBool(f.DUP)<<3 | int(f.QoS)<<1 | encodeBool(f.RETAIN))}
+	varHeader := []byte{0}
+	if len(payload) > 0 {
+		varHeader = encodeVariable(len(payload))
+	}
+	header = append(header, varHeader...)
+
+	return append(header, payload...)
 }
 
 func ReceiveFrame(r io.Reader) (*Frame, []byte, error) {
@@ -62,6 +68,9 @@ func ReceiveFrame(r io.Reader) (*Frame, []byte, error) {
 		DUP:    decodeBool(((b >> 3) & 0x01)),
 		QoS:    uint8(((b >> 1) & 0x03)),
 		RETAIN: decodeBool((b & 0x01)),
+	}
+	if !IsQoSAvaliable(f.QoS) {
+		return nil, nil, fmt.Errorf("invalid QoS level specified: %x", f.QoS)
 	}
 
 	// Read variable remain length

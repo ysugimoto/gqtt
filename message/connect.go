@@ -109,9 +109,9 @@ func ParseConnect(f *Frame, p []byte) (*Connect, error) {
 	return c, nil
 }
 
-func NewConnect() *Connect {
+func NewConnect(opts ...option) *Connect {
 	return &Connect{
-		Frame: newFrame(CONNECT),
+		Frame: newFrame(CONNECT, opts...),
 	}
 }
 
