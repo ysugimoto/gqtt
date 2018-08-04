@@ -44,7 +44,7 @@ func TestConnectEncodeDecodeOK(t *testing.T) {
 	assert.Equal(t, c.CleanStart, true)
 	assert.Equal(t, c.KeepAlive, uint16(30))
 	assert.Equal(t, c.ClientID, "gqtt-example")
-	assert.Nil(t, c.ConnectProperty)
+	assert.Nil(t, c.Property)
 	assert.Nil(t, c.WillProperty)
 	assert.Empty(t, c.WillTopic)
 	assert.Empty(t, c.WillPayload)
@@ -60,7 +60,7 @@ func TestUsingPropertyOnHeader(t *testing.T) {
 	c.CleanStart = true
 	c.KeepAlive = 30
 
-	c.ConnectProperty = &message.ConnectProperty{
+	c.Property = &message.ConnectProperty{
 		SessionExpiryInterval:      1000,
 		AuthenticationMethod:       "BASIC",
 		AuthenticationData:         []byte("user:password"),
@@ -96,19 +96,19 @@ func TestUsingPropertyOnHeader(t *testing.T) {
 	assert.Equal(t, c.CleanStart, true)
 	assert.Equal(t, c.KeepAlive, uint16(30))
 	assert.Equal(t, c.ClientID, "gqtt-example")
-	assert.NotNil(t, c.ConnectProperty)
-	assert.Equal(t, uint32(1000), c.ConnectProperty.SessionExpiryInterval)
-	assert.Equal(t, "BASIC", c.ConnectProperty.AuthenticationMethod)
-	assert.Equal(t, []byte("user:password"), c.ConnectProperty.AuthenticationData)
-	assert.True(t, c.ConnectProperty.RequestProblemInformation)
-	assert.True(t, c.ConnectProperty.RequestResponseInformation)
-	assert.Equal(t, uint16(100), c.ConnectProperty.ReceiveMaximum)
-	assert.Equal(t, uint16(100), c.ConnectProperty.TopicAliasMaximum)
-	assert.NotNil(t, c.ConnectProperty.UserProperty)
-	u := c.ConnectProperty.UserProperty
+	assert.NotNil(t, c.Property)
+	assert.Equal(t, uint32(1000), c.Property.SessionExpiryInterval)
+	assert.Equal(t, "BASIC", c.Property.AuthenticationMethod)
+	assert.Equal(t, []byte("user:password"), c.Property.AuthenticationData)
+	assert.True(t, c.Property.RequestProblemInformation)
+	assert.True(t, c.Property.RequestResponseInformation)
+	assert.Equal(t, uint16(100), c.Property.ReceiveMaximum)
+	assert.Equal(t, uint16(100), c.Property.TopicAliasMaximum)
+	assert.NotNil(t, c.Property.UserProperty)
+	u := c.Property.UserProperty
 	assert.Contains(t, u, "foo")
 	assert.Equal(t, u["foo"], "bar")
-	assert.Equal(t, uint32(65535), c.ConnectProperty.MaximumPacketSize)
+	assert.Equal(t, uint32(65535), c.Property.MaximumPacketSize)
 }
 
 func TestUsingWillPropertyOnHeader(t *testing.T) {

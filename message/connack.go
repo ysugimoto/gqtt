@@ -7,7 +7,7 @@ import (
 type ConnAck struct {
 	*Frame
 
-	ConnAckProperty    *ConnAckProperty
+	Property           *ConnAckProperty
 	SessionPresentFlag bool
 	ReasonCode         ReasonCode
 }
@@ -32,7 +32,7 @@ func ParseConnAck(f *Frame, p []byte) (*ConnAck, error) {
 		if err != nil {
 			return nil, err
 		}
-		c.ConnAckProperty = prop.ToConnAck()
+		c.Property = prop.ToConnAck()
 	}
 	// no payload
 	return c, nil
@@ -57,8 +57,8 @@ func (c *ConnAck) Encode() ([]byte, error) {
 		return nil, err
 	}
 	payload := append([]byte{}, byte(encodeBool(c.SessionPresentFlag)), c.ReasonCode.Byte())
-	if c.ConnAckProperty != nil {
-		payload = append(payload, c.ConnAckProperty.Encode()...)
+	if c.Property != nil {
+		payload = append(payload, c.Property.Encode()...)
 	}
 	return c.Frame.Encode(payload), nil
 }

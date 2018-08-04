@@ -8,35 +8,36 @@ type Publish struct {
 	*Frame
 
 	TopicName string
-	MessageID uint16
-	Body      string
+	MessageId uint16
+	Body      []byte
 
-	ClientId string
+	Property *PublishProperty
 }
 
 func ParsePublish(f *Frame, p []byte) (*Publish, error) {
 	pb := &Publish{
 		Frame: f,
 	}
-
-	var size, i int
-	size = ((int(p[i]) << 8) | int(p[i+1]))
-	i += 2
-	pb.TopicName = string(p[i:(i + size)])
-	i += size
-	// Message ID will present on QoS is greater than 0
-	if f.QoS > 0 {
-		pb.MessageID = uint16(((int(p[i]) << 8) | int(p[i+1])))
-		i += 2
+	var i, psize int
+	pb.TopicName, i = decodeString(p, i)
+	pb.MessageId, i = decodeUint16(p, i)
+	psize, i = decodeInt(p, i)
+	if psize > 0 {
+		prop, err := decodeProperty(p[i:(i + psize)])
+		if err != nil {
+			return nil, err
+		}
+		pb.Property = prop.ToPublish()
+		i += psize
 	}
-	pb.Body = string(p[i:])
+	pb.Body = p[i:]
 
 	return pb, nil
 }
 
-func NewPublish(f *Frame) *Publish {
+func NewPublish() *Publish {
 	return &Publish{
-		Frame: f,
+		Frame: newFrame(PUBLISH),
 	}
 }
 
@@ -44,7 +45,7 @@ func (p *Publish) Validate() error {
 	if p.TopicName == "" {
 		return errors.New("TopicName is required")
 	}
-	if p.Frame.QoS > 0 && p.MessageID == 0 {
+	if p.Frame.QoS > 0 && p.MessageId == 0 {
 		return errors.New("MessageID is required when QoS is greater than 0")
 	}
 	return nil
@@ -54,16 +55,13 @@ func (p *Publish) Encode() ([]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	buf := make([]byte, 0)
-	var size int
-
-	size = len([]byte(p.TopicName))
-	buf = append(buf, byte(size>>8), byte(size&0xFF))
-	buf = append(buf, []byte(p.TopicName)...)
-	if p.Frame.QoS > 0 {
-		buf = append(buf, byte(p.MessageID>>8), byte(p.MessageID&0xFF))
+	payload := make([]byte, 0)
+	payload = append(payload, encodeString(p.TopicName)...)
+	payload = append(payload, encodeUint16(p.MessageId)...)
+	if p.Property != nil {
+		payload = append(payload, p.Property.Encode()...)
 	}
-	buf = append(buf, []byte(p.Body)...)
+	payload = append(payload, p.Body...)
 
-	return p.Frame.Encode(buf), nil
+	return p.Frame.Encode(payload), nil
 }

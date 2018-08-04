@@ -21,8 +21,8 @@ type Connect struct {
 	KeepAlive    uint16
 
 	// Connection properties
-	ConnectProperty *ConnectProperty
-	WillProperty    *WillProperty
+	Property     *ConnectProperty
+	WillProperty *WillProperty
 
 	// Payloads
 	ClientID    string
@@ -56,7 +56,7 @@ func ParseConnect(f *Frame, p []byte) (*Connect, error) {
 		if err != nil {
 			return nil, err
 		}
-		c.ConnectProperty = prop.ToConnect()
+		c.Property = prop.ToConnect()
 		i += psize
 	}
 	c.ClientID, i = decodeString(p, i)
@@ -112,8 +112,8 @@ func (c *Connect) Encode() ([]byte, error) {
 		encodeBool(c.CleanStart)<<1
 	buf = append(buf, byte(flagByte))
 	buf = append(buf, encodeUint16(c.KeepAlive)...)
-	if c.ConnectProperty != nil {
-		buf = append(buf, c.ConnectProperty.Encode()...)
+	if c.Property != nil {
+		buf = append(buf, c.Property.Encode()...)
 	} else {
 		buf = append(buf, byte(0))
 	}

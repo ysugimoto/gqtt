@@ -10,7 +10,7 @@ import (
 
 func TestConnAckMessageEncodeDecode(t *testing.T) {
 	c := message.NewConnAck(message.Success)
-	c.ConnAckProperty = &message.ConnAckProperty{
+	c.Property = &message.ConnAckProperty{
 		SessionExpiryInterval:    1000,
 		AssignedClientIdentifier: "gqtt-test",
 		ServerKeepAlive:          10000,
@@ -44,8 +44,8 @@ func TestConnAckMessageEncodeDecode(t *testing.T) {
 	ca, err := message.ParseConnAck(f, p)
 	assert.NoError(t, err)
 	assert.Equal(t, ca.ReasonCode, message.Success)
-	assert.NotNil(t, ca.ConnAckProperty)
-	prop := ca.ConnAckProperty
+	assert.NotNil(t, ca.Property)
+	prop := ca.Property
 	assert.Equal(t, uint32(1000), prop.SessionExpiryInterval)
 	assert.Equal(t, "gqtt-test", prop.AssignedClientIdentifier)
 	assert.Equal(t, uint16(10000), prop.ServerKeepAlive)
