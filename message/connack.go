@@ -4,39 +4,50 @@ import (
 	"errors"
 )
 
-type ConnAckCode uint8
-
-const (
-	ConnAckOK ConnAckCode = iota
-	ConnAckForbiddenProtocol
-	ConnAckForbiddenID
-	ConnAckServerNotAvailable
-	ConnAckAuthFailed
-	ConnAckPermissionDenied
-)
-
 type ConnAck struct {
 	*Frame
 
-	ReturnCode ConnAckCode
+	ConnAckProperty    *ConnAckProperty
+	SessionPresentFlag bool
+	ReasonCode         ReasonCode
 }
 
 func ParseConnAck(f *Frame, p []byte) (*ConnAck, error) {
-	return &ConnAck{
-		Frame:      f,
-		ReturnCode: ConnAckCode(uint8(p[1])),
-	}, nil
+	c := &ConnAck{
+		Frame: f,
+	}
+	var i, b, psize int
+	var rc uint8
+
+	b, i = decodeInt(p, i)
+	c.SessionPresentFlag = decodeBool(b & 0x01)
+	rc, i = decodeUint(p, i)
+	if !IsReasonCodeAvailable(rc) {
+		return nil, errors.New("unpected reason code supplied")
+	}
+	c.ReasonCode = ReasonCode(rc)
+	psize, i = decodeInt(p, i)
+	if psize > 0 {
+		prop, err := decodeProperty(p[i:(i + psize)])
+		if err != nil {
+			return nil, err
+		}
+		c.ConnAckProperty = prop.ToConnAck()
+	}
+	// no payload
+	return c, nil
 }
 
-func NewConnAck(f *Frame) *ConnAck {
+func NewConnAck(code ReasonCode) *ConnAck {
 	return &ConnAck{
-		Frame: f,
+		Frame:      newFrame(CONNACK),
+		ReasonCode: code,
 	}
 }
 
 func (c *ConnAck) Validate() error {
-	if c.ReturnCode > ConnAckPermissionDenied {
-		return errors.New("Invalid return code")
+	if !IsReasonCodeAvailable(uint8(c.ReasonCode)) {
+		return errors.New("Invalid reason code")
 	}
 	return nil
 }
@@ -45,6 +56,9 @@ func (c *ConnAck) Encode() ([]byte, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	payload := []byte{byte(c.ReturnCode), 0}
+	payload := append([]byte{}, byte(encodeBool(c.SessionPresentFlag)), c.ReasonCode.Byte())
+	if c.ConnAckProperty != nil {
+		payload = append(payload, c.ConnAckProperty.Encode()...)
+	}
 	return c.Frame.Encode(payload), nil
 }

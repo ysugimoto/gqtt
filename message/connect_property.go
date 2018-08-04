@@ -13,7 +13,7 @@ type ConnectProperty struct {
 }
 
 func (c *ConnectProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		SessionExpiryInterval:      c.SessionExpiryInterval,
 		AuthenticationMethod:       c.AuthenticationMethod,
 		AuthenticationData:         c.AuthenticationData,

@@ -194,7 +194,7 @@ func decodeProperty(p []byte) (*Property, error) {
 	return prop, nil
 }
 
-func encodePropety(p *Property) []byte {
+func encodeProperty(p *Property) []byte {
 	buf := make([]byte, 0)
 	if p.PayloadFormatIndicator > 0 {
 		buf = append(buf, PayloadFormatIndicator.Byte())

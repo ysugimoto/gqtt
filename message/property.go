@@ -53,7 +53,7 @@ func (p *Property) ToWill() *WillProperty {
 }
 
 func (w *WillProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		PayloadFormatIndicator: w.PayloadFormatIndicator,
 		MessageExpiryInterval:  w.MessageExpiryInterval,
 		ContentType:            w.ContentType,
@@ -89,7 +89,7 @@ func (p *Property) ToPublish() *PublishProperty {
 }
 
 func (p *PublishProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		PayloadFormatIndicator: p.PayloadFormatIndicator,
 		MessageExpiryInterval:  p.MessageExpiryInterval,
 		ContentType:            p.ContentType,
@@ -114,7 +114,7 @@ func (p *Property) ToSubscribe() *SubscribeProperty {
 }
 
 func (s *SubscribeProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		SubscriptionIdentifier: s.SubscriptionIdentifier,
 		UserProperty:           s.UserProperty,
 	})
@@ -132,26 +132,6 @@ func (p *Property) ToConnect() *ConnectProperty {
 		UserProperty:               p.UserProperty,
 		MaximumPacketSize:          p.MaximumPacketSize,
 	}
-}
-
-type ConnAckProperty struct {
-	SessionExpiryInterval          uint32
-	AssignedClientIdentifier       string
-	ServerKeepAlive                uint16
-	AuthenticationMethod           string
-	AuthenticationData             []byte
-	ResponseInformation            string
-	ServerReference                string
-	ReasonString                   string
-	ReceiveMaximum                 uint16
-	TopicAliasMaximum              uint16
-	MaximumQoS                     uint8
-	RetainAvalilable               bool
-	UserProperty                   map[string]string
-	MaximumPacketSize              uint32
-	WildcardSubscriptionAvailable  bool
-	SubscrptionIdentifierAvailable bool
-	SharedSubscriptionsAvaliable   bool
 }
 
 func (p *Property) ToConnAck() *ConnAckProperty {
@@ -176,28 +156,6 @@ func (p *Property) ToConnAck() *ConnAckProperty {
 	}
 }
 
-func (c *ConnAckProperty) Encode() []byte {
-	return encodePropety(&Property{
-		SessionExpiryInterval:          c.SessionExpiryInterval,
-		AssignedClientIdentifier:       c.AssignedClientIdentifier,
-		ServerKeepAlive:                c.ServerKeepAlive,
-		AuthenticationMethod:           c.AuthenticationMethod,
-		AuthenticationData:             c.AuthenticationData,
-		ResponseInformation:            c.ResponseInformation,
-		ServerReference:                c.ServerReference,
-		ReasonString:                   c.ReasonString,
-		ReceiveMaximum:                 c.ReceiveMaximum,
-		TopicAliasMaximum:              c.TopicAliasMaximum,
-		MaximumQoS:                     c.MaximumQoS,
-		RetainAvalilable:               c.RetainAvalilable,
-		UserProperty:                   c.UserProperty,
-		MaximumPacketSize:              c.MaximumPacketSize,
-		WildcardSubscriptionAvailable:  c.WildcardSubscriptionAvailable,
-		SubscrptionIdentifierAvailable: c.SubscrptionIdentifierAvailable,
-		SharedSubscriptionsAvaliable:   c.SharedSubscriptionsAvaliable,
-	})
-}
-
 type DisconnectProperty struct {
 	SessionExpiryInterval uint32
 	ServerReference       string
@@ -215,7 +173,7 @@ func (p *Property) ToDisconnect() *DisconnectProperty {
 }
 
 func (d *DisconnectProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		SessionExpiryInterval: d.SessionExpiryInterval,
 		ServerReference:       d.ServerReference,
 		ReasonString:          d.ReasonString,
@@ -240,7 +198,7 @@ func (p *Property) ToAuth() *AuthProperty {
 }
 
 func (a *AuthProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		AuthenticationMethod: a.AuthenticationMethod,
 		AuthenticationData:   a.AuthenticationData,
 		ReasonString:         a.ReasonString,
@@ -261,7 +219,7 @@ func (p *Property) ToPubAck() *PubAckProperty {
 }
 
 func (p *PubAckProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		ReasonString: p.ReasonString,
 		UserProperty: p.UserProperty,
 	})
@@ -273,7 +231,7 @@ type PubRecProperty struct {
 }
 
 func (p *PubRecProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		ReasonString: p.ReasonString,
 		UserProperty: p.UserProperty,
 	})
@@ -299,7 +257,7 @@ func (p *Property) ToPubRel() *PubRelProperty {
 }
 
 func (p *PubRelProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		ReasonString: p.ReasonString,
 		UserProperty: p.UserProperty,
 	})
@@ -318,7 +276,7 @@ func (p *Property) ToPubComp() *PubCompProperty {
 }
 
 func (p *PubCompProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		ReasonString: p.ReasonString,
 		UserProperty: p.UserProperty,
 	})
@@ -337,7 +295,7 @@ func (p *Property) ToSubAck() *SubAckProperty {
 }
 
 func (p *SubAckProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		ReasonString: p.ReasonString,
 		UserProperty: p.UserProperty,
 	})
@@ -356,7 +314,7 @@ func (p *Property) ToUnsubAck() *UnsubAckProperty {
 }
 
 func (p *UnsubAckProperty) Encode() []byte {
-	return encodePropety(&Property{
+	return encodeProperty(&Property{
 		ReasonString: p.ReasonString,
 		UserProperty: p.UserProperty,
 	})
