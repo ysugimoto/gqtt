@@ -8,7 +8,7 @@ import (
 	"github.com/ysugimoto/gqtt/message"
 )
 
-func TestConnectEncodeErrorIfClientIDIsEmpty(t *testing.T) {
+func TestConnectEncodeErrorIfClientIdIsEmpty(t *testing.T) {
 	buf, err := message.NewConnect().Encode()
 	assert.Error(t, err)
 	assert.Nil(t, buf)
@@ -16,7 +16,7 @@ func TestConnectEncodeErrorIfClientIDIsEmpty(t *testing.T) {
 
 func TestConnectEncodeDecodeOK(t *testing.T) {
 	c := message.NewConnect()
-	c.ClientID = "gqtt-example"
+	c.ClientId = "gqtt-example"
 	c.ProtocolName = "MQTT"
 	c.ProtocolVersion = 5
 	c.CleanStart = true
@@ -28,7 +28,7 @@ func TestConnectEncodeDecodeOK(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Exactly(t, f.Type, message.CONNECT)
 	assert.Exactly(t, f.DUP, false)
-	assert.Equal(t, f.QoS, uint8(0))
+	assert.Equal(t, f.QoS, message.QoS0)
 	assert.Exactly(t, f.RETAIN, false)
 	assert.Equal(t, f.Size, uint64(len(p)))
 
@@ -39,11 +39,11 @@ func TestConnectEncodeDecodeOK(t *testing.T) {
 	assert.Equal(t, c.FlagUsername, false)
 	assert.Equal(t, c.FlagPassword, false)
 	assert.Equal(t, c.WillRetain, false)
-	assert.Equal(t, c.WillQoS, uint8(0))
+	assert.Equal(t, c.WillQoS, message.QoS0)
 	assert.Equal(t, c.FlagWill, false)
 	assert.Equal(t, c.CleanStart, true)
 	assert.Equal(t, c.KeepAlive, uint16(30))
-	assert.Equal(t, c.ClientID, "gqtt-example")
+	assert.Equal(t, c.ClientId, "gqtt-example")
 	assert.Nil(t, c.Property)
 	assert.Nil(t, c.WillProperty)
 	assert.Empty(t, c.WillTopic)
@@ -54,7 +54,7 @@ func TestConnectEncodeDecodeOK(t *testing.T) {
 
 func TestUsingPropertyOnHeader(t *testing.T) {
 	c := message.NewConnect()
-	c.ClientID = "gqtt-example"
+	c.ClientId = "gqtt-example"
 	c.ProtocolName = "MQTT"
 	c.ProtocolVersion = 5
 	c.CleanStart = true
@@ -80,7 +80,7 @@ func TestUsingPropertyOnHeader(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Exactly(t, f.Type, message.CONNECT)
 	assert.Exactly(t, f.DUP, false)
-	assert.Equal(t, f.QoS, uint8(0))
+	assert.Equal(t, f.QoS, message.QoS0)
 	assert.Exactly(t, f.RETAIN, false)
 	assert.Equal(t, f.Size, uint64(len(p)))
 
@@ -91,11 +91,11 @@ func TestUsingPropertyOnHeader(t *testing.T) {
 	assert.Equal(t, c.FlagUsername, false)
 	assert.Equal(t, c.FlagPassword, false)
 	assert.Equal(t, c.WillRetain, false)
-	assert.Equal(t, c.WillQoS, uint8(0))
+	assert.Equal(t, c.WillQoS, message.QoS0)
 	assert.Equal(t, c.FlagWill, false)
 	assert.Equal(t, c.CleanStart, true)
 	assert.Equal(t, c.KeepAlive, uint16(30))
-	assert.Equal(t, c.ClientID, "gqtt-example")
+	assert.Equal(t, c.ClientId, "gqtt-example")
 	assert.NotNil(t, c.Property)
 	assert.Equal(t, uint32(1000), c.Property.SessionExpiryInterval)
 	assert.Equal(t, "BASIC", c.Property.AuthenticationMethod)
@@ -113,7 +113,7 @@ func TestUsingPropertyOnHeader(t *testing.T) {
 
 func TestUsingWillPropertyOnHeader(t *testing.T) {
 	c := message.NewConnect()
-	c.ClientID = "gqtt-example"
+	c.ClientId = "gqtt-example"
 	c.ProtocolName = "MQTT"
 	c.ProtocolVersion = 5
 	c.CleanStart = true
@@ -137,7 +137,7 @@ func TestUsingWillPropertyOnHeader(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Exactly(t, f.Type, message.CONNECT)
 	assert.Exactly(t, f.DUP, false)
-	assert.Equal(t, f.QoS, uint8(0))
+	assert.Equal(t, f.QoS, message.QoS0)
 	assert.Exactly(t, f.RETAIN, false)
 	assert.Equal(t, f.Size, uint64(len(p)))
 
@@ -148,11 +148,11 @@ func TestUsingWillPropertyOnHeader(t *testing.T) {
 	assert.Equal(t, c.FlagUsername, false)
 	assert.Equal(t, c.FlagPassword, false)
 	assert.Equal(t, c.WillRetain, false)
-	assert.Equal(t, c.WillQoS, uint8(0))
+	assert.Equal(t, c.WillQoS, message.QoS0)
 	assert.Equal(t, c.FlagWill, false)
 	assert.Equal(t, c.CleanStart, true)
 	assert.Equal(t, c.KeepAlive, uint16(30))
-	assert.Equal(t, c.ClientID, "gqtt-example")
+	assert.Equal(t, c.ClientId, "gqtt-example")
 	assert.NotNil(t, c.WillProperty)
 	assert.Equal(t, uint8(1), c.WillProperty.PayloadFormatIndicator)
 	assert.Equal(t, uint32(1000), c.WillProperty.MessageExpiryInterval)

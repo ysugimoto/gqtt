@@ -39,7 +39,7 @@ func TestPublishQoS0MessageEncodeDecodeOK(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Exactly(t, f.Type, message.PUBLISH)
 	assert.Exactly(t, f.DUP, false)
-	assert.Equal(t, f.QoS, uint8(0))
+	assert.Equal(t, f.QoS, message.QoS0)
 	assert.Exactly(t, f.RETAIN, false)
 	assert.Equal(t, f.Size, uint64(len(p)))
 

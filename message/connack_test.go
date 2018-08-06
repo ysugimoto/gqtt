@@ -38,7 +38,7 @@ func TestConnAckMessageEncodeDecode(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Exactly(t, f.Type, message.CONNACK)
 	assert.Exactly(t, f.DUP, false)
-	assert.Equal(t, f.QoS, uint8(0))
+	assert.Equal(t, f.QoS, message.QoS0)
 	assert.Exactly(t, f.RETAIN, false)
 
 	ca, err := message.ParseConnAck(f, p)

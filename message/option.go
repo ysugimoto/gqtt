@@ -19,7 +19,7 @@ func WithRetain() option {
 	}
 }
 
-func WithQoS(qos uint8) option {
+func WithQoS(qos QoSLevel) option {
 	return option{
 		name:  optionNameQoS,
 		value: qos,

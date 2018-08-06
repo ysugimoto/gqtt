@@ -25,8 +25,8 @@ type PublishProperty struct {
 	UserProperty           map[string]string
 }
 
-func (p *PublishProperty) Encode() []byte {
-	return encodeProperty(&Property{
+func (p *PublishProperty) ToProp() *Property {
+	return &Property{
 		PayloadFormatIndicator: p.PayloadFormatIndicator,
 		MessageExpiryInterval:  p.MessageExpiryInterval,
 		ContentType:            p.ContentType,
@@ -35,27 +35,28 @@ func (p *PublishProperty) Encode() []byte {
 		SubscriptionIdentifier: p.SubscriptionIdentifier,
 		TopicAlias:             p.TopicAlias,
 		UserProperty:           p.UserProperty,
-	})
+	}
 }
 
-func ParsePublish(f *Frame, p []byte) (*Publish, error) {
-	pb := &Publish{
+func ParsePublish(f *Frame, p []byte) (pb *Publish, err error) {
+	pb = &Publish{
 		Frame: f,
 	}
-	var i, psize int
-	pb.TopicName, i = decodeString(p, i)
-	pb.MessageId, i = decodeUint16(p, i)
-	psize, i = decodeInt(p, i)
-	if psize > 0 {
-		prop, err := decodeProperty(p[i:(i + psize)])
-		if err != nil {
-			return nil, err
-		}
-		pb.Property = prop.ToPublish()
-		i += psize
+	dec := newDecoder(p)
+	if pb.TopicName, err = dec.String(); err != nil {
+		return nil, err
 	}
-	pb.Body = p[i:]
-
+	if pb.MessageId, err = dec.Uint16(); err != nil {
+		return nil, err
+	}
+	if prop, err := dec.Property(); err != nil {
+		return nil, err
+	} else if prop != nil {
+		pb.Property = prop.ToPublish()
+	}
+	if pb.Body, err = dec.BinaryAll(); err != nil {
+		return nil, err
+	}
 	return pb, nil
 }
 
@@ -79,13 +80,15 @@ func (p *Publish) Encode() ([]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	payload := make([]byte, 0)
-	payload = append(payload, encodeString(p.TopicName)...)
-	payload = append(payload, encodeUint16(p.MessageId)...)
+	enc := newEncoder()
+	enc.String(p.TopicName)
+	enc.Uint16(p.MessageId)
 	if p.Property != nil {
-		payload = append(payload, p.Property.Encode()...)
+		enc.Property(p.Property.ToProp())
+	} else {
+		enc.Uint(0)
 	}
-	payload = append(payload, p.Body...)
+	enc.BinaryAll(p.Body)
 
-	return p.Frame.Encode(payload), nil
+	return p.Frame.Encode(enc.Get()), nil
 }

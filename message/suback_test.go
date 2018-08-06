@@ -8,46 +8,51 @@ import (
 	"github.com/ysugimoto/gqtt/message"
 )
 
-func TestSubAckMessageFailedIfMessageIDIsZero(t *testing.T) {
-	s := message.NewSubAck(&message.Frame{
-		Type: message.SUBACK,
-	})
+func TestSubAckMessageFailedIfPacketIdIsZero(t *testing.T) {
+	s := message.NewSubAck()
 	buf, err := s.Encode()
 	assert.Error(t, err)
 	assert.Nil(t, buf)
 }
 
-func TestSubAckMessageFailedIfQoSsIsZero(t *testing.T) {
-	s := message.NewSubAck(&message.Frame{
-		Type: message.SUBACK,
-	})
-	s.MessageID = 1000
+func TestSubAckMessageFailedIfReasonCodesIsEmpty(t *testing.T) {
+	s := message.NewSubAck()
+	s.PacketId = 1000
 	buf, err := s.Encode()
 	assert.Error(t, err)
 	assert.Nil(t, buf)
 }
 
 func TestSubAckMessageEncodeDecodeOK(t *testing.T) {
-	s := message.NewSubAck(&message.Frame{
-		Type: message.SUBACK,
-	})
-	s.MessageID = 1000
-	s.AddQoS(message.QoS0, message.QoS1)
+	s := message.NewSubAck()
+	s.PacketId = 1000
+	s.AddReasonCode(message.GrantedQoS0, message.GrantedQoS1, message.GrantedQoS2)
+	s.Property = &message.SubAckProperty{
+		ReasonString: "suback ok",
+		UserProperty: map[string]string{
+			"foo": "bar",
+		},
+	}
 	buf, err := s.Encode()
 	assert.NoError(t, err)
 
 	f, p, err := message.ReceiveFrame(bytes.NewReader(buf))
 	assert.NoError(t, err)
-	assert.Exactly(t, f.Type, message.SUBACK)
-	assert.Exactly(t, f.DUP, false)
-	assert.Equal(t, f.QoS, uint8(0))
-	assert.Exactly(t, f.RETAIN, false)
-	assert.Equal(t, f.Size, uint64(len(p)))
+	assert.Exactly(t, message.SUBACK, f.Type)
+	assert.False(t, f.DUP)
+	assert.Equal(t, message.QoS0, f.QoS)
+	assert.False(t, f.RETAIN)
+	assert.Equal(t, uint64(len(p)), f.Size)
 
 	s, err = message.ParseSubAck(f, p)
 	assert.NoError(t, err)
-	assert.Equal(t, s.MessageID, uint16(1000))
-	assert.Equal(t, len(s.QoSs), 2)
-	assert.Equal(t, s.QoSs[0], message.QoS0)
-	assert.Equal(t, s.QoSs[1], message.QoS1)
+	assert.Equal(t, uint16(1000), s.PacketId)
+	assert.Equal(t, 3, len(s.ReasonCodes))
+	assert.Equal(t, message.GrantedQoS0, s.ReasonCodes[0])
+	assert.Equal(t, message.GrantedQoS1, s.ReasonCodes[1])
+	assert.Equal(t, message.GrantedQoS2, s.ReasonCodes[2])
+	assert.NotNil(t, s.Property)
+	assert.Equal(t, "suback ok", s.Property.ReasonString)
+	assert.Contains(t, s.Property.UserProperty, "foo")
+	assert.Equal(t, "bar", s.Property.UserProperty["foo"])
 }

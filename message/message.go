@@ -4,11 +4,11 @@ type (
 	MessageType  uint8
 	PropertyType uint8
 	ReasonCode   uint8
-	QoS          uint8
+	QoSLevel     uint8
 )
 
 const (
-	QoS0 QoS = iota
+	QoS0 QoSLevel = iota
 	QoS1
 	QoS2
 )
@@ -64,7 +64,7 @@ const (
 
 const (
 	Success                             ReasonCode = 0x00
-	NotmalDisconnection                 ReasonCode = 0x00
+	NormalDisconnection                 ReasonCode = 0x00
 	GrantedQoS0                         ReasonCode = 0x00
 	GrantedQoS1                         ReasonCode = 0x01
 	GrantedQoS2                         ReasonCode = 0x02

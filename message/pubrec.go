@@ -2,30 +2,68 @@ package message
 
 import (
 	"errors"
+	"io"
 )
 
 type PubRec struct {
 	*Frame
 
-	MessageID uint16
+	PacketId   uint16
+	ReasonCode ReasonCode
+	Property   *PubRecProperty
 }
 
-func ParsePubRec(f *Frame, p []byte) (*PubRec, error) {
-	return &PubRec{
-		Frame:     f,
-		MessageID: uint16(((int(p[0]) << 8) | int(p[1]))),
-	}, nil
+type PubRecProperty struct {
+	ReasonString string
+	UserProperty map[string]string
 }
 
-func NewPubRec(f *Frame) *PubRec {
+func (p *PubRecProperty) ToProp() *Property {
+	return &Property{
+		ReasonString: p.ReasonString,
+		UserProperty: p.UserProperty,
+	}
+}
+
+func ParsePubRec(f *Frame, p []byte) (pr *PubRec, err error) {
+	pr = &PubRec{
+		Frame:      f,
+		ReasonCode: Success,
+	}
+	dec := newDecoder(p)
+	if pr.PacketId, err = dec.Uint16(); err != nil {
+		return nil, err
+	}
+	if rc, err := dec.Uint(); err != nil {
+		if err != io.EOF {
+			return nil, err
+		}
+		return pr, nil
+	} else if !IsReasonCodeAvailable(rc) {
+		return nil, errors.New("unexpected reason code spcified")
+	} else {
+		pr.ReasonCode = ReasonCode(rc)
+	}
+
+	if prop, err := dec.Property(); err != nil {
+		if err != io.EOF {
+			return nil, err
+		}
+	} else if prop != nil {
+		pr.Property = prop.ToPubRec()
+	}
+	return pr, nil
+}
+
+func NewPubRec(opts ...option) *PubRec {
 	return &PubRec{
-		Frame: f,
+		Frame: newFrame(PUBREC, opts...),
 	}
 }
 
 func (p *PubRec) Validate() error {
-	if p.MessageID == 0 {
-		return errors.New("MessageID must not be zero")
+	if p.PacketId == 0 {
+		return errors.New("Packet ID must not be zero")
 	}
 	return nil
 }
@@ -34,8 +72,13 @@ func (p *PubRec) Encode() ([]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	payload := make([]byte, 0)
-	payload = append(payload, byte(p.MessageID>>8), byte(p.MessageID&0xFF))
 
-	return p.Frame.Encode(payload), nil
+	enc := newEncoder()
+	enc.Uint16(p.PacketId)
+	enc.Byte(p.ReasonCode.Byte())
+	if p.Property != nil {
+		enc.Property(p.Property.ToProp())
+	}
+
+	return p.Frame.Encode(enc.Get()), nil
 }

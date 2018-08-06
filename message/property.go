@@ -30,16 +30,6 @@ type Property struct {
 	SharedSubscriptionsAvaliable   bool
 }
 
-type WillProperty struct {
-	PayloadFormatIndicator uint8
-	MessageExpiryInterval  uint32
-	ContentType            string
-	ResponseTopic          string
-	CorrelationData        []byte
-	WillDelayInterval      uint32
-	UserProperty           map[string]string
-}
-
 func (p *Property) ToWill() *WillProperty {
 	return &WillProperty{
 		PayloadFormatIndicator: p.PayloadFormatIndicator,
@@ -50,18 +40,6 @@ func (p *Property) ToWill() *WillProperty {
 		WillDelayInterval:      p.WillDelayInterval,
 		UserProperty:           p.UserProperty,
 	}
-}
-
-func (w *WillProperty) Encode() []byte {
-	return encodeProperty(&Property{
-		PayloadFormatIndicator: w.PayloadFormatIndicator,
-		MessageExpiryInterval:  w.MessageExpiryInterval,
-		ContentType:            w.ContentType,
-		ResponseTopic:          w.ResponseTopic,
-		CorrelationData:        w.CorrelationData,
-		WillDelayInterval:      w.WillDelayInterval,
-		UserProperty:           w.UserProperty,
-	})
 }
 
 func (p *Property) ToPublish() *PublishProperty {
@@ -77,23 +55,11 @@ func (p *Property) ToPublish() *PublishProperty {
 	}
 }
 
-type SubscribeProperty struct {
-	SubscriptionIdentifier uint64
-	UserProperty           map[string]string
-}
-
 func (p *Property) ToSubscribe() *SubscribeProperty {
 	return &SubscribeProperty{
 		SubscriptionIdentifier: p.SubscriptionIdentifier,
 		UserProperty:           p.UserProperty,
 	}
-}
-
-func (s *SubscribeProperty) Encode() []byte {
-	return encodeProperty(&Property{
-		SubscriptionIdentifier: s.SubscriptionIdentifier,
-		UserProperty:           s.UserProperty,
-	})
 }
 
 func (p *Property) ToConnect() *ConnectProperty {
@@ -132,13 +98,6 @@ func (p *Property) ToConnAck() *ConnAckProperty {
 	}
 }
 
-type DisconnectProperty struct {
-	SessionExpiryInterval uint32
-	ServerReference       string
-	ReasonString          string
-	UserProperty          map[string]string
-}
-
 func (p *Property) ToDisconnect() *DisconnectProperty {
 	return &DisconnectProperty{
 		SessionExpiryInterval: p.SessionExpiryInterval,
@@ -146,22 +105,6 @@ func (p *Property) ToDisconnect() *DisconnectProperty {
 		ReasonString:          p.ReasonString,
 		UserProperty:          p.UserProperty,
 	}
-}
-
-func (d *DisconnectProperty) Encode() []byte {
-	return encodeProperty(&Property{
-		SessionExpiryInterval: d.SessionExpiryInterval,
-		ServerReference:       d.ServerReference,
-		ReasonString:          d.ReasonString,
-		UserProperty:          d.UserProperty,
-	})
-}
-
-type AuthProperty struct {
-	AuthenticationMethod string
-	AuthenticationData   []byte
-	ReasonString         string
-	UserProperty         map[string]string
 }
 
 func (p *Property) ToAuth() *AuthProperty {
@@ -173,44 +116,11 @@ func (p *Property) ToAuth() *AuthProperty {
 	}
 }
 
-func (a *AuthProperty) Encode() []byte {
-	return encodeProperty(&Property{
-		AuthenticationMethod: a.AuthenticationMethod,
-		AuthenticationData:   a.AuthenticationData,
-		ReasonString:         a.ReasonString,
-		UserProperty:         a.UserProperty,
-	})
-}
-
-type PubAckProperty struct {
-	ReasonString string
-	UserProperty map[string]string
-}
-
 func (p *Property) ToPubAck() *PubAckProperty {
 	return &PubAckProperty{
 		ReasonString: p.ReasonString,
 		UserProperty: p.UserProperty,
 	}
-}
-
-func (p *PubAckProperty) Encode() []byte {
-	return encodeProperty(&Property{
-		ReasonString: p.ReasonString,
-		UserProperty: p.UserProperty,
-	})
-}
-
-type PubRecProperty struct {
-	ReasonString string
-	UserProperty map[string]string
-}
-
-func (p *PubRecProperty) Encode() []byte {
-	return encodeProperty(&Property{
-		ReasonString: p.ReasonString,
-		UserProperty: p.UserProperty,
-	})
 }
 
 func (p *Property) ToPubRec() *PubRecProperty {
@@ -220,28 +130,11 @@ func (p *Property) ToPubRec() *PubRecProperty {
 	}
 }
 
-type PubRelProperty struct {
-	ReasonString string
-	UserProperty map[string]string
-}
-
 func (p *Property) ToPubRel() *PubRelProperty {
 	return &PubRelProperty{
 		ReasonString: p.ReasonString,
 		UserProperty: p.UserProperty,
 	}
-}
-
-func (p *PubRelProperty) Encode() []byte {
-	return encodeProperty(&Property{
-		ReasonString: p.ReasonString,
-		UserProperty: p.UserProperty,
-	})
-}
-
-type PubCompProperty struct {
-	ReasonString string
-	UserProperty map[string]string
 }
 
 func (p *Property) ToPubComp() *PubCompProperty {
@@ -251,18 +144,6 @@ func (p *Property) ToPubComp() *PubCompProperty {
 	}
 }
 
-func (p *PubCompProperty) Encode() []byte {
-	return encodeProperty(&Property{
-		ReasonString: p.ReasonString,
-		UserProperty: p.UserProperty,
-	})
-}
-
-type SubAckProperty struct {
-	ReasonString string
-	UserProperty map[string]string
-}
-
 func (p *Property) ToSubAck() *SubAckProperty {
 	return &SubAckProperty{
 		ReasonString: p.ReasonString,
@@ -270,16 +151,10 @@ func (p *Property) ToSubAck() *SubAckProperty {
 	}
 }
 
-func (p *SubAckProperty) Encode() []byte {
-	return encodeProperty(&Property{
-		ReasonString: p.ReasonString,
+func (p *Property) ToUnsubscribe() *UnsubscribeProperty {
+	return &UnsubscribeProperty{
 		UserProperty: p.UserProperty,
-	})
-}
-
-type UnsubAckProperty struct {
-	ReasonString string
-	UserProperty map[string]string
+	}
 }
 
 func (p *Property) ToUnsubAck() *UnsubAckProperty {
@@ -287,11 +162,4 @@ func (p *Property) ToUnsubAck() *UnsubAckProperty {
 		ReasonString: p.ReasonString,
 		UserProperty: p.UserProperty,
 	}
-}
-
-func (p *UnsubAckProperty) Encode() []byte {
-	return encodeProperty(&Property{
-		ReasonString: p.ReasonString,
-		UserProperty: p.UserProperty,
-	})
 }

@@ -2,6 +2,7 @@ package message
 
 import (
 	"errors"
+	"io"
 )
 
 type ConnAck struct {
@@ -32,8 +33,8 @@ type ConnAckProperty struct {
 	SharedSubscriptionsAvaliable   bool
 }
 
-func (c *ConnAckProperty) Encode() []byte {
-	return encodeProperty(&Property{
+func (c *ConnAckProperty) ToProp() *Property {
+	return &Property{
 		SessionExpiryInterval:          c.SessionExpiryInterval,
 		AssignedClientIdentifier:       c.AssignedClientIdentifier,
 		ServerKeepAlive:                c.ServerKeepAlive,
@@ -51,29 +52,32 @@ func (c *ConnAckProperty) Encode() []byte {
 		WildcardSubscriptionAvailable:  c.WildcardSubscriptionAvailable,
 		SubscrptionIdentifierAvailable: c.SubscrptionIdentifierAvailable,
 		SharedSubscriptionsAvaliable:   c.SharedSubscriptionsAvaliable,
-	})
+	}
 }
 
-func ParseConnAck(f *Frame, p []byte) (*ConnAck, error) {
-	c := &ConnAck{
+func ParseConnAck(f *Frame, p []byte) (c *ConnAck, err error) {
+	c = &ConnAck{
 		Frame: f,
 	}
-	var i, b, psize int
-	var rc uint8
-
-	b, i = decodeInt(p, i)
-	c.SessionPresentFlag = decodeBool(b & 0x01)
-	rc, i = decodeUint(p, i)
-	if !IsReasonCodeAvailable(rc) {
-		return nil, errors.New("unpected reason code supplied")
+	dec := newDecoder(p)
+	if i, err := dec.Int(); err != nil {
+		return nil, err
+	} else {
+		c.SessionPresentFlag = (i & 0x01) > 0
 	}
-	c.ReasonCode = ReasonCode(rc)
-	psize, i = decodeInt(p, i)
-	if psize > 0 {
-		prop, err := decodeProperty(p[i:(i + psize)])
-		if err != nil {
+	if rc, err := dec.Uint(); err != nil {
+		return nil, err
+	} else if !IsReasonCodeAvailable(rc) {
+		return nil, errors.New("unexpected reason code supplied")
+	} else {
+		c.ReasonCode = ReasonCode(rc)
+	}
+
+	if prop, err := dec.Property(); err != nil {
+		if err != io.EOF {
 			return nil, err
 		}
+	} else if prop != nil {
 		c.Property = prop.ToConnAck()
 	}
 	// no payload
@@ -98,9 +102,17 @@ func (c *ConnAck) Encode() ([]byte, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	payload := append([]byte{}, byte(encodeBool(c.SessionPresentFlag)), c.ReasonCode.Byte())
-	if c.Property != nil {
-		payload = append(payload, c.Property.Encode()...)
+	enc := newEncoder()
+	if c.SessionPresentFlag {
+		enc.Int(1)
+	} else {
+		enc.Int(0)
 	}
-	return c.Frame.Encode(payload), nil
+	enc.Byte(c.ReasonCode.Byte())
+	if c.Property != nil {
+		enc.Property(c.Property.ToProp())
+	} else {
+		enc.Uint(0)
+	}
+	return c.Frame.Encode(enc.Get()), nil
 }

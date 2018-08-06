@@ -9,7 +9,7 @@ import (
 type Frame struct {
 	Type   MessageType
 	DUP    bool
-	QoS    uint8
+	QoS    QoSLevel
 	RETAIN bool
 	Size   uint64
 }
@@ -23,14 +23,14 @@ func newFrame(mt MessageType, options ...option) *Frame {
 		case optionNameRetain:
 			f.RETAIN = o.value.(bool)
 		case optionNameQoS:
-			f.QoS = o.value.(uint8)
+			f.QoS = o.value.(QoSLevel)
 		}
 	}
 	return f
 }
 
-func (f *Frame) SetQoS(qos QoS) {
-	f.QoS = uint8(qos)
+func (f *Frame) SetQoS(qos QoSLevel) {
+	f.QoS = qos
 }
 func (f *Frame) SetRetain(retain bool) {
 	f.RETAIN = retain
@@ -66,10 +66,10 @@ func ReceiveFrame(r io.Reader) (*Frame, []byte, error) {
 	f := &Frame{
 		Type:   MessageType((b >> 4) & 0x0F),
 		DUP:    decodeBool(((b >> 3) & 0x01)),
-		QoS:    uint8(((b >> 1) & 0x03)),
+		QoS:    QoSLevel(((b >> 1) & 0x03)),
 		RETAIN: decodeBool((b & 0x01)),
 	}
-	if !IsQoSAvaliable(f.QoS) {
+	if !IsQoSAvaliable(uint8(f.QoS)) {
 		return nil, nil, fmt.Errorf("invalid QoS level specified: %x", f.QoS)
 	}
 

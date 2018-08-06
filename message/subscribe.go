@@ -2,64 +2,96 @@ package message
 
 import (
 	"errors"
+	"io"
 )
-
-type SubscribeTopic struct {
-	Name string
-	QoS  uint8
-}
 
 type Subscribe struct {
 	*Frame
 
-	MessageID uint16
-	Topics    []SubscribeTopic
-
-	ClientId string
+	PacketId      uint16
+	Property      *SubscribeProperty
+	Subscriptions []SubscribeTopic
 }
 
-func ParseSubscribe(f *Frame, p []byte) (*Subscribe, error) {
-	s := &Subscribe{
-		Frame:  f,
-		Topics: make([]SubscribeTopic, 0),
+type SubscribeProperty struct {
+	SubscriptionIdentifier uint64
+	UserProperty           map[string]string
+}
+
+func (s *SubscribeProperty) ToProp() *Property {
+	return &Property{
+		SubscriptionIdentifier: s.SubscriptionIdentifier,
+		UserProperty:           s.UserProperty,
+	}
+}
+
+type SubscribeTopic struct {
+	RetainHandling uint8
+	RAP            bool
+	NoLocal        bool
+	TopicName      string
+	QoS            QoSLevel
+}
+
+func ParseSubscribe(f *Frame, p []byte) (s *Subscribe, err error) {
+	s = &Subscribe{
+		Frame:         f,
+		Subscriptions: make([]SubscribeTopic, 0),
 	}
 
-	var size, i int
-	s.MessageID = uint16(((int(p[i]) << 8) | int(p[i+1])))
-	i += 2
-	for i < len(p) {
-		t := SubscribeTopic{}
-		size = ((int(p[i]) << 8) | int(p[i+1]))
-		i += 2
-		t.Name = string(p[i:(i + size)])
-		i += size
-		t.QoS = uint8(p[i])
-		i++
-		s.Topics = append(s.Topics, t)
+	dec := newDecoder(p)
+	if s.PacketId, err = dec.Uint16(); err != nil {
+		return nil, err
+	}
+	if prop, err := dec.Property(); err != nil {
+		return nil, err
+	} else if prop != nil {
+		s.Property = prop.ToSubscribe()
+	}
+	// payload for Topic filter + subscription options, ...
+	for {
+		var t string
+		var b int
+		if t, err = dec.String(); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		if b, err = dec.Int(); err != nil {
+			return nil, err
+		}
+		st := SubscribeTopic{
+			RetainHandling: uint8((b >> 4) & 0x03),
+			RAP:            ((b >> 3) & 0x01) > 0,
+			NoLocal:        (b >> 2 & 0x01) > 0,
+			QoS:            QoSLevel((b & 0x03)),
+			TopicName:      t,
+		}
+		s.Subscriptions = append(s.Subscriptions, st)
 	}
 	return s, nil
 }
 
-func NewSubscribe(f *Frame) *Subscribe {
+func NewSubscribe(opts ...option) *Subscribe {
 	return &Subscribe{
-		Frame:  f,
-		Topics: make([]SubscribeTopic, 0),
+		Frame:         newFrame(SUBSCRIBE, opts...),
+		Subscriptions: make([]SubscribeTopic, 0),
 	}
 }
 
-func (s *Subscribe) AddTopic(name string, qos uint8) {
-	s.Topics = append(s.Topics, SubscribeTopic{
-		Name: name,
-		QoS:  qos,
-	})
+func (s *Subscribe) AddTopic(sts ...SubscribeTopic) {
+	for _, st := range sts {
+		s.Subscriptions = append(s.Subscriptions, st)
+	}
 }
 
 func (s *Subscribe) Validate() error {
-	if len(s.Topics) == 0 {
+	if len(s.Subscriptions) == 0 {
 		return errors.New("At least one topic should subscribe")
 	}
-	if s.MessageID == 0 {
-		return errors.New("MessageID is required")
+	if s.PacketId == 0 {
+		return errors.New("PacketId is required")
 	}
 	return nil
 }
@@ -68,16 +100,25 @@ func (s *Subscribe) Encode() ([]byte, error) {
 	if err := s.Validate(); err != nil {
 		return nil, err
 	}
-	buf := make([]byte, 0)
-	var size int
 
-	buf = append(buf, byte(s.MessageID>>8), byte(s.MessageID&0xFF))
-	for _, v := range s.Topics {
-		size = len([]byte(v.Name))
-		buf = append(buf, byte(size>>8), byte(size&0xFF))
-		buf = append(buf, []byte(v.Name)...)
-		buf = append(buf, byte(v.QoS))
+	enc := newEncoder()
+	enc.Uint16(s.PacketId)
+	if s.Property != nil {
+		enc.Property(s.Property.ToProp())
+	} else {
+		enc.Uint(0)
 	}
 
-	return s.Frame.Encode(buf), nil
+	eb := func(b bool) int {
+		if b {
+			return 1
+		}
+		return 0
+	}
+	for _, v := range s.Subscriptions {
+		enc.String(v.TopicName)
+		enc.Uint(uint8(int(v.RetainHandling)<<4 | eb(v.RAP)<<3 | eb(v.NoLocal)<<2 | int(v.QoS)))
+	}
+
+	return s.Frame.Encode(enc.Get()), nil
 }
