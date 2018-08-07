@@ -9,18 +9,14 @@ import (
 )
 
 func TestPingReqMessageEncodeDecode(t *testing.T) {
-	c := message.NewPingReq(&message.Frame{
-		Type: message.PINGREQ,
-	})
+	c := message.NewPingReq()
 	buf, err := c.Encode()
 	assert.NoError(t, err)
 
-	f, p, err := message.ReceiveFrame(bytes.NewReader(buf))
+	f, _, err := message.ReceiveFrame(bytes.NewReader(buf))
 	assert.NoError(t, err)
-	assert.Exactly(t, f.Type, message.PINGREQ)
-	assert.Exactly(t, f.DUP, false)
-	assert.Equal(t, f.QoS, uint8(0))
-	assert.Exactly(t, f.RETAIN, false)
-	assert.Equal(t, f.Size, uint64(0))
-	assert.Equal(t, f.Size, uint64(len(p)))
+	assert.Exactly(t, message.PINGREQ, f.Type)
+	assert.False(t, f.DUP)
+	assert.Equal(t, message.QoS0, f.QoS)
+	assert.False(t, f.RETAIN)
 }

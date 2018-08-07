@@ -10,9 +10,9 @@ func ParsePingResp(f *Frame, p []byte) (*PingResp, error) {
 	}, nil
 }
 
-func NewPingResp(f *Frame) *PingResp {
+func NewPingResp() *PingResp {
 	return &PingResp{
-		Frame: f,
+		Frame: newFrame(PINGRESP),
 	}
 }
 

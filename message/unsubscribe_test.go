@@ -9,46 +9,48 @@ import (
 )
 
 func TestUnsubscribeNGWhenTopicIsEmpty(t *testing.T) {
-	s := message.NewUnsubscribe(&message.Frame{
-		Type: message.UNSUBSCRIBE,
-	})
-	s.MessageID = 1000
-	buf, err := s.Encode()
+	u := message.NewUnsubscribe()
+	u.PacketId = 1000
+	buf, err := u.Encode()
 	assert.Error(t, err)
 	assert.Nil(t, buf)
 }
 
-func TestUnsubscribeNGWhenMessageIDIsEmpty(t *testing.T) {
-	s := message.NewUnsubscribe(&message.Frame{
-		Type: message.UNSUBSCRIBE,
-	})
-	s.AddTopic("foo/bar", "foo/bar/baz")
-	buf, err := s.Encode()
+func TestUnsubscribeNGWhenPacketIdIsEmpty(t *testing.T) {
+	u := message.NewUnsubscribe()
+	u.AddTopic("foo/bar", "foo/bar/baz")
+	buf, err := u.Encode()
 	assert.Error(t, err)
 	assert.Nil(t, buf)
 }
 
 func TestUnsubscribeMessageEncodeDecodeOK(t *testing.T) {
-	s := message.NewUnsubscribe(&message.Frame{
-		Type: message.UNSUBSCRIBE,
-	})
-	s.MessageID = 1000
-	s.AddTopic("foo/bar", "foo/bar/baz")
-	buf, err := s.Encode()
+	u := message.NewUnsubscribe()
+	u.PacketId = 1000
+	u.AddTopic("foo/bar", "foo/bar/baz")
+	u.Property = &message.UnsubscribeProperty{
+		UserProperty: map[string]string{
+			"foo": "bar",
+		},
+	}
+	buf, err := u.Encode()
 	assert.NoError(t, err)
 
 	f, p, err := message.ReceiveFrame(bytes.NewReader(buf))
 	assert.NoError(t, err)
-	assert.Exactly(t, f.Type, message.UNSUBSCRIBE)
-	assert.Exactly(t, f.DUP, false)
-	assert.Equal(t, f.QoS, uint8(0))
-	assert.Exactly(t, f.RETAIN, false)
-	assert.Equal(t, f.Size, uint64(len(p)))
+	assert.Exactly(t, message.UNSUBSCRIBE, f.Type)
+	assert.False(t, f.DUP)
+	assert.Equal(t, message.QoS0, f.QoS)
+	assert.False(t, f.RETAIN)
+	assert.Equal(t, uint64(len(p)), f.Size)
 
-	s, err = message.ParseUnsubscribe(f, p)
+	u, err = message.ParseUnsubscribe(f, p)
 	assert.NoError(t, err)
-	assert.Equal(t, s.MessageID, uint16(1000))
-	assert.Equal(t, len(s.Topics), 2)
-	assert.Equal(t, s.Topics[0], "foo/bar")
-	assert.Equal(t, s.Topics[1], "foo/bar/baz")
+	assert.Equal(t, uint16(1000), u.PacketId)
+	assert.Equal(t, 2, len(u.Topics))
+	assert.Equal(t, "foo/bar", u.Topics[0])
+	assert.Equal(t, "foo/bar/baz", u.Topics[1])
+	assert.NotNil(t, u.Property)
+	assert.Contains(t, u.Property.UserProperty, "foo")
+	assert.Equal(t, "bar", u.Property.UserProperty["foo"])
 }
