@@ -6,6 +6,18 @@ import (
 	"io"
 )
 
+type Packet struct {
+	Frame   *Frame
+	Payload []byte
+}
+
+func NewPacket(f *Frame, p []byte) *Packet {
+	return &Packet{
+		Frame:   f,
+		Payload: p,
+	}
+}
+
 type Frame struct {
 	Type   MessageType
 	DUP    bool

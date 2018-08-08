@@ -8,16 +8,16 @@ import (
 	"github.com/ysugimoto/gqtt/message"
 )
 
+/*
 func TestPublishQoS0MessageEncodeNGWhenTopicNameIsEmpty(t *testing.T) {
-	pb := message.NewPublish()
+	pb := message.NewPublish(0)
 	pb.Body = []byte("gqtt-body")
-	buf, err := pb.Encode()
+	_, err := pb.Encode()
 	assert.Error(t, err)
-	assert.Nil(t, buf)
 }
 
 func TestPublishQoS0MessageEncodeDecodeOK(t *testing.T) {
-	pb := message.NewPublish()
+	pb := message.NewPublish(0)
 	pb.TopicName = "foo/bar"
 	pb.Body = []byte("gqtt-body")
 	pb.Property = &message.PublishProperty{
@@ -47,7 +47,7 @@ func TestPublishQoS0MessageEncodeDecodeOK(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "foo/bar", pb.TopicName)
 	assert.Equal(t, []byte("gqtt-body"), pb.Body)
-	assert.Equal(t, uint16(0), pb.MessageId)
+	assert.Equal(t, uint16(0), pb.PacketId)
 	assert.NotNil(t, pb.Property)
 	prop := pb.Property
 	assert.Equal(t, uint8(1), prop.PayloadFormatIndicator)
@@ -63,12 +63,26 @@ func TestPublishQoS0MessageEncodeDecodeOK(t *testing.T) {
 	assert.Equal(t, prop.UserProperty["foo"], "bar")
 }
 
-func TestPublishQoS1MessageErrorIfMessaggeIDIsEmpty(t *testing.T) {
-	pb := message.NewPublish()
+func TestPublishQoS1MessageErrorIfPacketIdIsZero(t *testing.T) {
+	pb := message.NewPublish(0)
 	pb.TopicName = "foo/bar"
 	pb.Body = []byte("gqtt-body")
 	pb.QoS = message.QoS1
 	buf, err := pb.Encode()
 	assert.Error(t, err)
 	assert.Nil(t, buf)
+}
+
+*/
+func TestDecodePublishFromRawBytes(t *testing.T) {
+	pb := message.NewPublish(0, message.WithQoS(message.QoS0))
+	pb.TopicName = "gqtt/example"
+	buf, err := pb.Encode()
+	assert.NoError(t, err)
+	// raw := []byte{48, 15, 0, 2, 103, 113, 116, 116, 47, 101, 120, 97, 109, 112, 108, 101, 0}
+	// assert.Equal(t, raw, buf)
+	f, p, err := message.ReceiveFrame(bytes.NewReader(buf))
+	assert.NoError(t, err)
+	_, err = message.ParsePublish(f, p)
+	assert.NoError(t, err)
 }

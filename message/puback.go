@@ -55,9 +55,10 @@ func ParsePubAck(f *Frame, p []byte) (pa *PubAck, err error) {
 	return pa, nil
 }
 
-func NewPubAck(opts ...option) *PubAck {
+func NewPubAck(packetId uint16, opts ...option) *PubAck {
 	return &PubAck{
-		Frame: newFrame(PUBACK, opts...),
+		Frame:    newFrame(PUBACK, opts...),
+		PacketId: packetId,
 	}
 }
 

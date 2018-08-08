@@ -5,6 +5,9 @@ type (
 	PropertyType uint8
 	ReasonCode   uint8
 	QoSLevel     uint8
+	Encoder      interface {
+		Encode() ([]byte, error)
+	}
 )
 
 const (

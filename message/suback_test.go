@@ -9,23 +9,21 @@ import (
 )
 
 func TestSubAckMessageFailedIfPacketIdIsZero(t *testing.T) {
-	s := message.NewSubAck()
+	s := message.NewSubAck(0)
 	buf, err := s.Encode()
 	assert.Error(t, err)
 	assert.Nil(t, buf)
 }
 
 func TestSubAckMessageFailedIfReasonCodesIsEmpty(t *testing.T) {
-	s := message.NewSubAck()
-	s.PacketId = 1000
+	s := message.NewSubAck(1000)
 	buf, err := s.Encode()
 	assert.Error(t, err)
 	assert.Nil(t, buf)
 }
 
 func TestSubAckMessageEncodeDecodeOK(t *testing.T) {
-	s := message.NewSubAck()
-	s.PacketId = 1000
+	s := message.NewSubAck(1000)
 	s.AddReasonCode(message.GrantedQoS0, message.GrantedQoS1, message.GrantedQoS2)
 	s.Property = &message.SubAckProperty{
 		ReasonString: "suback ok",

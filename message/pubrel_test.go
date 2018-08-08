@@ -9,7 +9,7 @@ import (
 )
 
 func TestPubRelMessageFailedIfPacketIdIsZero(t *testing.T) {
-	rel := message.NewPubRel()
+	rel := message.NewPubRel(0)
 	buf, err := rel.Encode()
 	assert.Error(t, err)
 	assert.Nil(t, buf)
@@ -17,8 +17,7 @@ func TestPubRelMessageFailedIfPacketIdIsZero(t *testing.T) {
 
 func TestPubRelEncodeDecodeOK(t *testing.T) {
 	t.Run("Omit return code", func(t *testing.T) {
-		rel := message.NewPubRel()
-		rel.PacketId = 60000
+		rel := message.NewPubRel(60000)
 		buf, err := rel.Encode()
 		assert.NoError(t, err)
 
@@ -37,8 +36,7 @@ func TestPubRelEncodeDecodeOK(t *testing.T) {
 		assert.Nil(t, rel.Property)
 	})
 	t.Run("Omit variable property", func(t *testing.T) {
-		rel := message.NewPubRel()
-		rel.PacketId = 60000
+		rel := message.NewPubRel(60000)
 		rel.ReasonCode = message.NoSubscriptionExisted
 		buf, err := rel.Encode()
 		assert.NoError(t, err)
@@ -58,8 +56,7 @@ func TestPubRelEncodeDecodeOK(t *testing.T) {
 		assert.Nil(t, rel.Property)
 	})
 	t.Run("Full case", func(t *testing.T) {
-		rel := message.NewPubRel()
-		rel.PacketId = 60000
+		rel := message.NewPubRel(60000)
 		rel.ReasonCode = message.Success
 		rel.Property = &message.PubRelProperty{
 			ReasonString: "well done",

@@ -9,16 +9,14 @@ import (
 )
 
 func TestPubAckMessageFailedIfPacketIdIsZero(t *testing.T) {
-	ack := message.NewPubAck()
-	buf, err := ack.Encode()
-	assert.Error(t, err)
-	assert.Nil(t, buf)
+	ack := message.NewPubAck(10)
+	_, err := ack.Encode()
+	assert.NoError(t, err)
 }
 
 func TestPubAckEncodeDecodeOK(t *testing.T) {
 	t.Run("Omit return code", func(t *testing.T) {
-		ack := message.NewPubAck()
-		ack.PacketId = 60000
+		ack := message.NewPubAck(60000)
 		buf, err := ack.Encode()
 		assert.NoError(t, err)
 
@@ -37,8 +35,7 @@ func TestPubAckEncodeDecodeOK(t *testing.T) {
 		assert.Nil(t, ack.Property)
 	})
 	t.Run("Omit variable property", func(t *testing.T) {
-		ack := message.NewPubAck()
-		ack.PacketId = 60000
+		ack := message.NewPubAck(60000)
 		ack.ReasonCode = message.NoSubscriptionExisted
 		buf, err := ack.Encode()
 		assert.NoError(t, err)
@@ -58,8 +55,7 @@ func TestPubAckEncodeDecodeOK(t *testing.T) {
 		assert.Nil(t, ack.Property)
 	})
 	t.Run("Full case", func(t *testing.T) {
-		ack := message.NewPubAck()
-		ack.PacketId = 60000
+		ack := message.NewPubAck(60000)
 		ack.ReasonCode = message.Success
 		ack.Property = &message.PubAckProperty{
 			ReasonString: "well done",

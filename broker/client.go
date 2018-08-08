@@ -3,78 +3,58 @@ package broker
 import (
 	"bufio"
 	"context"
-	"log"
 	"net"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/satori/go.uuid"
+	"github.com/ysugimoto/gqtt/internal/log"
 	"github.com/ysugimoto/gqtt/message"
 )
 
-type ConnectionState uint8
-
-const (
-	CONNECTING ConnectionState = iota
-	CONNECTED
-	CLOSED
-)
+const defaultKeepAlive = 30
 
 type Client struct {
-	State   ConnectionState
-	ctx     context.Context
-	conn    net.Conn
-	id      string
-	timeout time.Time
+	id        string
+	ctx       context.Context
+	conn      net.Conn
+	timeout   *time.Ticker
+	Packet    chan *message.Packet
+	Publisher chan []byte
+	send      chan []byte
+	terminate context.CancelFunc
 
-	topics map[string]uint8
-	mu     sync.Mutex
 	once   sync.Once
-
-	send   chan []byte
 	writer *bufio.Writer
-
-	connection message.Connection
+	info   message.Connect
 }
 
-func NewClient(conn net.Conn, ctx context.Context, id string) *Client {
+func NewClient(conn net.Conn, ctx context.Context) *Client {
+	c, cancel := context.WithCancel(ctx)
 	return &Client{
-		State:  CONNECTING,
-		ctx:    c,
-		id:     id,
-		conn:   conn,
-		topics: make(map[string]uint8),
+		id:        uuid.NewV4().String(),
+		conn:      conn,
+		ctx:       c,
+		terminate: cancel,
+		Packet:    make(chan *message.Packet),
+		Publisher: make(chan []byte),
+		send:      make(chan []byte),
 	}
 }
 
-func (c *Client) Handshake(timeout time.Duration) error {
-	f, p, err := message.ReceiveFrame(c.conn)
-	if err != nil {
-		log.Println("receive frame error: ", err)
-		return err
-	}
-	cn, err := message.ParseConnect(f, p)
-	if err != nil {
-		log.Println("frame expects connect package: ", err)
-		return err
-	}
-	c.info = *cn
-	log.Printf("CONNECT accepted: %+v\n", c)
+func (c *Client) Closed() <-chan struct{} {
+	return c.ctx.Done()
+}
 
-	w := bufio.NewWriter(s)
-	ack := message.NewConnAck(&message.Frame{
-		Type: message.CONNACK,
-	})
-	if buf, err := ack.Encode(); err != nil {
-		log.Println("CONNACK encode error: ", err)
-		return err
-	} else if _, err := c.Send(buf); err != nil {
-		log.Println("CONNACK write error: ", err)
-		return err
+func (c *Client) Timeout() <-chan time.Time {
+	if c.timeout == nil {
+		return nil
 	}
+	return c.timeout.C
+}
 
-	return nil
+func (c *Client) Id() string {
+	return c.id
 }
 
 func (c *Client) Read(b []byte) (int, error) {
@@ -83,13 +63,74 @@ func (c *Client) Read(b []byte) (int, error) {
 
 func (c *Client) Close() {
 	c.once.Do(func() {
+		c.terminate()
 		c.conn.Close()
-		c.State = CLOSED
+		if c.timeout != nil {
+			c.timeout.Stop()
+		}
 	})
 }
 
-func (c *Client) Id() string {
-	return c.id
+func (c *Client) Handshake(timeout time.Duration) (err error) {
+	c.conn.SetDeadline(time.Now().Add(timeout))
+	var (
+		reason  message.ReasonCode
+		frame   *message.Frame
+		payload []byte
+		cn      *message.Connect
+	)
+	defer func() {
+		log.Debug("defer: send CONNACK")
+		ack := message.NewConnAck(reason)
+		if err != nil {
+			ack.Property = &message.ConnAckProperty{
+				ReasonString: err.Error(),
+			}
+		}
+		if buf, err := ack.Encode(); err != nil {
+			log.Debug("CONNACK encode error: ", err)
+		} else {
+			c.Send(buf)
+		}
+		c.conn.SetDeadline(time.Time{})
+	}()
+
+	frame, payload, err = message.ReceiveFrame(c)
+	if err != nil {
+		log.Debug("receive frame error: ", err)
+		reason = message.MalformedPacket
+		return err
+	}
+	cn, err = message.ParseConnect(frame, payload)
+	if err != nil {
+		reason = message.MalformedPacket
+		log.Debug("frame expects connect package: ", err)
+		return err
+	}
+	c.info = *cn
+	log.Debugf("CONNECT accepted: %+v\n", cn)
+	reason = message.Success
+	return nil
+}
+
+func (c *Client) readLoop() {
+	var to time.Duration
+	if c.info.KeepAlive > 0 {
+		to = time.Duration(c.info.KeepAlive)
+	} else {
+		to = time.Duration(defaultKeepAlive)
+	}
+
+	c.timeout = time.NewTicker(to * time.Second)
+
+	for {
+		frame, payload, err := message.ReceiveFrame(c)
+		if err != nil {
+			c.Close()
+		}
+		log.Debug("readLoop(); packet received")
+		c.Packet <- message.NewPacket(frame, payload)
+	}
 }
 
 func (c *Client) Send(m []byte) {
@@ -100,19 +141,21 @@ func (c *Client) Send(m []byte) {
 }
 
 func (c *Client) writeLoop() {
+	log.Debug("Start write loop")
 	c.writer = bufio.NewWriter(c.conn)
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.Closed():
 			c.Close()
 			return
 		case buf := <-c.send:
+			log.Debug("accept send buffer")
 			if _, err := c.writer.Write(buf); err != nil {
-				log.Printf("socket write error: %s", err.Error())
+				log.Debugf("socket write error: %s", err.Error())
 				// Backoff when error is temporary net error
 				if ne, ok := err.(net.Error); ok {
 					if ne.Temporary() {
-						log.Printf("socket error is temporary, backoff")
+						log.Debugf("socket error is temporary, backoff")
 						time.Sleep(10 * time.Millisecond)
 						c.send <- buf
 						break
@@ -121,52 +164,44 @@ func (c *Client) writeLoop() {
 				return
 			}
 			if err := c.writer.Flush(); err != nil {
-				log.Printf("writer flush error: %s", err.Error())
+				log.Debugf("writer flush error: %s", err.Error())
+				return
+			}
+			log.Debug("buffer sent successfuuly")
+		case buf := <-c.Publisher:
+			log.Debug("Received buffer from publisher")
+			if _, err := c.writer.Write(buf); err != nil {
+				log.Debugf("socket write error: %s", err.Error())
+				// Backoff when error is temporary net error
+				if ne, ok := err.(net.Error); ok {
+					if ne.Temporary() {
+						log.Debugf("socket error is temporary, backoff")
+						time.Sleep(10 * time.Millisecond)
+						c.send <- buf
+						break
+					}
+				}
+				return
+			}
+			if err := c.writer.Flush(); err != nil {
+				log.Debugf("writer flush error: %s", err.Error())
 				return
 			}
 		}
 	}
 }
 
-func (c *Client) Sendable(topicName string) bool {
-	topicName = strings.Replace(topicName, "+", ".+", -1)
-	topicName = strings.Replace(topicName, "/#", ".*", -1)
-	topicName += "$"
-
-	r, err := regexp.Compile(topicName)
-	if err != nil {
-		log.Printf("failed to complie topicName to regexp: %s: %s\n", topicName, err.Error())
-		return false
-	}
-	for t, _ := range c.topics {
-		if r.MatchString(t) {
-			return true
-		}
-	}
-	return false
-}
-
 func (c *Client) Ping() {
-	c.timeout = time.Now().Add(30 * time.Minute)
-}
-
-func (c *Client) Subscribe(topics ...string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for _, t := range topics {
-		c.topics[formatTopicPath(t)] = 0 // temporary QoS 0
+	if c.timeout != nil {
+		c.timeout.Stop()
 	}
-}
-
-func (c *Client) Unsubscribe(topics ...string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for _, t := range topics {
-		t = formatTopicPath(t)
-		if _, ok := c.topics[t]; ok {
-			delete(c.topics, t)
-		}
+	var to time.Duration
+	if c.info.KeepAlive > 0 {
+		to = time.Duration(c.info.KeepAlive)
+	} else {
+		to = time.Duration(defaultKeepAlive)
 	}
+	c.timeout = time.NewTicker(to * time.Second)
+	pr, _ := message.NewPingResp().Encode()
+	c.Send(pr)
 }

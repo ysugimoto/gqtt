@@ -55,9 +55,10 @@ func ParseSubAck(f *Frame, p []byte) (s *SubAck, err error) {
 	return s, nil
 }
 
-func NewSubAck(rcs ...ReasonCode) *SubAck {
+func NewSubAck(packetId uint16, rcs ...ReasonCode) *SubAck {
 	return &SubAck{
 		Frame:       newFrame(SUBACK),
+		PacketId:    packetId,
 		ReasonCodes: rcs,
 	}
 }

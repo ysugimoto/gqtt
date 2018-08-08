@@ -130,6 +130,9 @@ func (d *decoder) Binary() ([]byte, error) {
 
 func (d *decoder) BinaryAll() ([]byte, error) {
 	remains := d.r.Len()
+	if remains == 0 {
+		return []byte{}, nil
+	}
 	buf := make([]byte, remains)
 	if n, err := d.r.Read(buf); err != nil {
 		return nil, err
