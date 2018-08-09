@@ -27,6 +27,7 @@ type Client struct {
 	once   sync.Once
 	writer *bufio.Writer
 	info   message.Connect
+	mu     sync.Mutex
 }
 
 func NewClient(conn net.Conn, ctx context.Context) *Client {
@@ -37,7 +38,7 @@ func NewClient(conn net.Conn, ctx context.Context) *Client {
 		ctx:       c,
 		terminate: cancel,
 		Packet:    make(chan *message.Packet),
-		Publisher: make(chan []byte),
+		Publisher: make(chan []byte, 1),
 		send:      make(chan []byte),
 	}
 }
@@ -140,6 +141,23 @@ func (c *Client) Send(m []byte) {
 	c.send <- m
 }
 
+func (c *Client) sendPacket(m []byte) error {
+	c.mu.Lock()
+	defer func() {
+		time.Sleep(100 * time.Microsecond)
+		c.mu.Unlock()
+	}()
+
+	if _, err := c.writer.Write(m); err != nil {
+		log.Debug("failed to write packet: ", m)
+		return err
+	} else if err := c.writer.Flush(); err != nil {
+		log.Debug("failed to flush packet: ", m)
+		return err
+	}
+	return nil
+}
+
 func (c *Client) writeLoop() {
 	log.Debug("Start write loop")
 	c.writer = bufio.NewWriter(c.conn)
@@ -150,43 +168,34 @@ func (c *Client) writeLoop() {
 			return
 		case buf := <-c.send:
 			log.Debug("accept send buffer")
-			if _, err := c.writer.Write(buf); err != nil {
+			if err := c.sendPacket(buf); err != nil {
 				log.Debugf("socket write error: %s", err.Error())
 				// Backoff when error is temporary net error
 				if ne, ok := err.(net.Error); ok {
 					if ne.Temporary() {
 						log.Debugf("socket error is temporary, backoff")
 						time.Sleep(10 * time.Millisecond)
-						c.send <- buf
+						c.Send(buf)
 						break
 					}
 				}
-				return
-			}
-			if err := c.writer.Flush(); err != nil {
-				log.Debugf("writer flush error: %s", err.Error())
-				return
 			}
 			log.Debug("buffer sent successfuuly")
 		case buf := <-c.Publisher:
 			log.Debug("Received buffer from publisher")
-			if _, err := c.writer.Write(buf); err != nil {
+			if err := c.sendPacket(buf); err != nil {
 				log.Debugf("socket write error: %s", err.Error())
 				// Backoff when error is temporary net error
 				if ne, ok := err.(net.Error); ok {
 					if ne.Temporary() {
 						log.Debugf("socket error is temporary, backoff")
 						time.Sleep(10 * time.Millisecond)
-						c.send <- buf
+						c.Send(buf)
 						break
 					}
 				}
-				return
 			}
-			if err := c.writer.Flush(); err != nil {
-				log.Debugf("writer flush error: %s", err.Error())
-				return
-			}
+			log.Debug("client published successfuuly")
 		}
 	}
 }

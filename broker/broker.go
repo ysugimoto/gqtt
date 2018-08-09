@@ -56,6 +56,7 @@ func (b *Broker) ListenAndServe(ctx context.Context) error {
 func (b *Broker) handleConnection(conn net.Conn, ctx context.Context) {
 	client := NewClient(conn, ctx)
 	defer func() {
+		log.Debug("============================ Client closing =======================")
 		b.removeClient(client.Id())
 		client.Close()
 	}()
@@ -126,7 +127,7 @@ func (b *Broker) handleConnection(conn net.Conn, ctx context.Context) {
 					return
 				} else if ack == nil {
 					log.Debug("ack is nil due to Qos0")
-					return
+					continue
 				}
 				if buf, err := ack.Encode(); err != nil {
 					log.Debugf("failed to encode PUBACK/PUBREC packet: %s\n", err.Error())
@@ -144,17 +145,22 @@ func (b *Broker) handleConnection(conn net.Conn, ctx context.Context) {
 
 func (b *Broker) publishMessage(pb *message.Publish) (message.Encoder, error) {
 	ids := b.subscription.FindAll(pb.TopicName)
+	log.Debugf("targets: %+v\n", ids)
 	if len(ids) > 0 {
 		buf, err := pb.Encode()
 		if err != nil {
+			log.Debug("failed to encode publish message: ", err)
 			return nil, err
 		}
 		b.mu.Lock()
 		defer b.mu.Unlock()
+		log.Debugf("current clients: %+v\n", b.clients)
 		for _, id := range ids {
 			if c, ok := b.clients[id]; ok {
 				log.Debugf("send publish message to: %s\n", id)
 				c <- buf
+			} else {
+				log.Debugf("client %s not found\n", id)
 			}
 		}
 	}
@@ -183,5 +189,6 @@ func (b *Broker) removeClient(clientId string) {
 	if c, ok := b.clients[clientId]; ok {
 		close(c)
 		delete(b.clients, clientId)
+		b.subscription.Unsubscribe(clientId)
 	}
 }

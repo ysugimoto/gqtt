@@ -36,10 +36,12 @@ type Client struct {
 	writer       *bufio.Writer
 	pingInterval *time.Ticker
 
-	Closed chan struct{}
+	Closed  chan struct{}
+	Message chan *message.Publish
 
 	once       sync.Once
 	ServerInfo *ServerInfo
+	mu         sync.Mutex
 }
 
 func NewClient(u string) *Client {
@@ -74,9 +76,18 @@ func (c *Client) ConnectWithOption(ctx context.Context, opt *ClientOption) error
 	c.outgoing = make(chan []byte)
 	c.Closed = make(chan struct{})
 	c.sessions = make(map[uint16]session)
+	c.Message = make(chan *message.Publish)
 
 	// TODO: set duration from option
-	c.pingInterval = time.NewTicker(5 * time.Second)
+	go func() {
+		c.pingInterval = time.NewTicker(5 * time.Second)
+		for {
+			<-c.pingInterval.C
+			log.Debug("ping interval is coming. send ping to server")
+			ping, _ := message.NewPingReq().Encode()
+			c.outgoing <- ping
+		}
+	}()
 
 	go func() {
 		defer c.terminate()
@@ -104,6 +115,7 @@ func (c *Client) ConnectWithOption(ctx context.Context, opt *ClientOption) error
 
 func (c *Client) Disconnect() {
 	c.once.Do(func() {
+		log.Debug("============================ Client closing =======================")
 		c.pingInterval.Stop()
 		close(c.outgoing)
 		close(c.incoming)
@@ -112,7 +124,7 @@ func (c *Client) Disconnect() {
 		if err != nil {
 			log.Debug("failed to encode DISCONNECT message: ", err)
 		} else {
-			c.sendSync(dc)
+			c.sendPacket(dc)
 			log.Debug("Send DISCONNECT")
 		}
 		log.Debug("Closing connection")
@@ -123,13 +135,22 @@ func (c *Client) Disconnect() {
 	})
 }
 
-func (c *Client) sendSync(m []byte) error {
+func (c *Client) sendPacket(m []byte) error {
 	if c.writer == nil {
 		c.writer = bufio.NewWriter(c.conn)
 	}
+
+	c.mu.Lock()
+	defer func() {
+		time.Sleep(100 * time.Microsecond)
+		c.mu.Unlock()
+	}()
+
 	if _, err := c.writer.Write(m); err != nil {
+		log.Debug("failed to write packet: ", m)
 		return err
 	} else if err := c.writer.Flush(); err != nil {
+		log.Debug("failed to flush packet: ", m)
 		return err
 	}
 	return nil
@@ -142,21 +163,11 @@ func (c *Client) mainLoop() {
 			log.Debugf("terminated")
 			c.Disconnect()
 			return
-		case <-c.pingInterval.C:
-			log.Debug("ping interval is coming. send ping to server")
-			ping, _ := message.NewPingReq().Encode()
-			if err := c.sendSync(ping); err != nil {
-				log.Debug("failed to send ping: ", err)
-				c.terminate()
-				return
-			}
-			log.Debug("ping sent successfully")
 		case packet := <-c.outgoing:
-			if err := c.sendSync(packet); err != nil {
+			if err := c.sendPacket(packet); err != nil {
 				log.Debug("failed to write packet: ", err)
 				c.terminate()
 			}
-			log.Debug("successfully write packet: ", packet)
 		case packet := <-c.incoming:
 			switch packet.Frame.Type {
 			case message.PINGRESP:
@@ -192,6 +203,14 @@ func (c *Client) mainLoop() {
 				}
 				sess.Channel <- ack
 				delete(c.sessions, ack.PacketId)
+			case message.PUBLISH:
+				log.Debug("PUBLISH message received")
+				pb, err := message.ParsePublish(packet.Frame, packet.Payload)
+				if err != nil {
+					log.Debug("malformed packet: failed to decode to PUBLISH packet: ", err)
+					continue
+				}
+				c.Message <- pb
 			case message.PUBREC:
 				ack, err := message.ParsePubRec(packet.Frame, packet.Payload)
 				if err != nil {

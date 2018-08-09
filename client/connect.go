@@ -74,6 +74,7 @@ func handshake(conn net.Conn, opt *ClientOption) (*ServerInfo, error) {
 			log.Debug("CONNACK doesn't reply success code: ", ack.ReasonCode)
 			return nil, errors.New("CONNACK doesn't reply success code")
 		} else {
+			log.Debug("CONNACK received, clientId is ", connect.ClientId)
 			return ack.Property, nil
 		}
 	case message.AUTH:

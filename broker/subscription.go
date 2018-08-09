@@ -7,22 +7,39 @@ import (
 )
 
 type Subscription struct {
-	topics map[string][]string
+	topics map[string]map[string]struct{}
 	mu     sync.Mutex
 }
 
 func NewSubscription() *Subscription {
 	return &Subscription{
-		topics: map[string][]string{},
+		topics: map[string]map[string]struct{}{},
+	}
+}
+
+func (s *Subscription) Unsubscribe(clientId string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for n, cs := range s.topics {
+		if _, ok := cs[clientId]; ok {
+			delete(s.topics[n], clientId)
+		}
 	}
 }
 
 func (s *Subscription) Add(clientId string, t message.SubscribeTopic) message.ReasonCode {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if v, ok := s.topics[t.TopicName]; ok {
-		v = append(v, clientId)
+		v[clientId] = struct{}{}
 	} else {
-		s.topics[t.TopicName] = []string{clientId}
+		s.topics[t.TopicName] = map[string]struct{}{
+			clientId: struct{}{},
+		}
 	}
+	log.Debugf("topic added for %s, all: %+v\n", t.TopicName, s.topics[t.TopicName])
 	switch t.QoS {
 	case message.QoS0:
 		return message.GrantedQoS0
@@ -47,7 +64,8 @@ func (s *Subscription) FindAll(topic string) []string {
 		if t != topic {
 			continue
 		}
-		for _, c := range clients {
+		log.Debug("clients for topic: %s %+v\n", t, clients)
+		for c, _ := range clients {
 			if _, ok := stack[c]; ok {
 				continue
 			}
