@@ -189,6 +189,6 @@ func (b *Broker) removeClient(clientId string) {
 	if c, ok := b.clients[clientId]; ok {
 		close(c)
 		delete(b.clients, clientId)
-		b.subscription.Unsubscribe(clientId)
+		b.subscription.RemoveAll(clientId)
 	}
 }

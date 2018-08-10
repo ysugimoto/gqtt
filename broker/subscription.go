@@ -17,11 +17,25 @@ func NewSubscription() *Subscription {
 	}
 }
 
-func (s *Subscription) Unsubscribe(clientId string) {
+func (s *Subscription) RemoveAll(clientId string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for n, cs := range s.topics {
+		if _, ok := cs[clientId]; ok {
+			delete(s.topics[n], clientId)
+		}
+	}
+}
+
+func (s *Subscription) Unsubscribe(clientId, topic string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for n, cs := range s.topics {
+		if n != topic {
+			continue
+		}
 		if _, ok := cs[clientId]; ok {
 			delete(s.topics[n], clientId)
 		}
