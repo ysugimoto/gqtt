@@ -82,30 +82,14 @@ func (c *Client) ConnectWithOption(ctx context.Context, opt *ClientOption) error
 	go func() {
 		c.pingInterval = time.NewTicker(5 * time.Second)
 		for {
-			<-c.pingInterval.C
-			log.Debug("ping interval is coming. send ping to server")
-			ping, _ := message.NewPingReq().Encode()
-			c.outgoing <- ping
-		}
-	}()
-
-	go func() {
-		defer c.terminate()
-		for {
-			frame, payload, err := message.ReceiveFrame(c.conn)
-			if err != nil {
-				log.Debug("failed to receive message: ", err)
-				if nerr, ok := err.(net.Error); ok {
-					if nerr.Temporary() {
-						log.Debug("buffer is temporary, backoff")
-						continue
-					}
-				}
-				c.terminate()
+			select {
+			case <-c.ctx.Done():
 				return
+			case <-c.pingInterval.C:
+				log.Debug("ping interval is coming. send ping to server")
+				ping, _ := message.NewPingReq().Encode()
+				c.sendPacket(ping)
 			}
-			log.Debugf("frame received: %+v | %+v\n", frame.Type, payload)
-			c.incoming <- message.NewPacket(frame, payload)
 		}
 	}()
 	go c.mainLoop()
@@ -136,20 +120,17 @@ func (c *Client) Disconnect() {
 }
 
 func (c *Client) sendPacket(m []byte) error {
-	if c.writer == nil {
-		c.writer = bufio.NewWriter(c.conn)
-	}
-
 	c.mu.Lock()
-	defer func() {
-		time.Sleep(100 * time.Microsecond)
-		c.mu.Unlock()
-	}()
+	defer c.mu.Unlock()
 
-	if _, err := c.writer.Write(m); err != nil {
+	w := bufio.NewWriter(c.conn)
+	if n, err := w.Write(m); err != nil {
 		log.Debug("failed to write packet: ", m)
 		return err
-	} else if err := c.writer.Flush(); err != nil {
+	} else if n != len(m) {
+		log.Debug("could not enough patck")
+		return errors.New("could not write enough packet")
+	} else if err := w.Flush(); err != nil {
 		log.Debug("failed to flush packet: ", m)
 		return err
 	}
@@ -157,28 +138,35 @@ func (c *Client) sendPacket(m []byte) error {
 }
 
 func (c *Client) mainLoop() {
+	defer c.terminate()
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Debugf("terminated")
 			c.Disconnect()
 			return
-		case packet := <-c.outgoing:
-			if err := c.sendPacket(packet); err != nil {
-				log.Debug("failed to write packet: ", err)
-				c.terminate()
+		default:
+			frame, payload, err := message.ReceiveFrame(c.conn)
+			if err != nil {
+				log.Debug("failed to receive message: ", err)
+				if nerr, ok := err.(net.Error); ok {
+					if nerr.Temporary() {
+						log.Debug("buffer is temporary, backoff")
+						continue
+					}
+				}
+				return
 			}
-		case packet := <-c.incoming:
-			switch packet.Frame.Type {
+			switch frame.Type {
 			case message.PINGRESP:
-				pr, err := message.ParsePingReq(packet.Frame, packet.Payload)
+				pr, err := message.ParsePingResp(frame, payload)
 				if err != nil {
 					log.Debug("malformed packet: failed to decode to PINGREQ packet: ", err)
 					continue
 				}
 				log.Debugf("PINGRESP received: %+v\n", pr)
 			case message.SUBACK:
-				ack, err := message.ParseSubAck(packet.Frame, packet.Payload)
+				ack, err := message.ParseSubAck(frame, payload)
 				if err != nil {
 					log.Debug("malformed packet: failed to decode to SUBACK packet: ", err)
 					continue
@@ -191,7 +179,7 @@ func (c *Client) mainLoop() {
 				sess.Channel <- ack
 				delete(c.sessions, ack.PacketId)
 			case message.PUBACK:
-				ack, err := message.ParsePubAck(packet.Frame, packet.Payload)
+				ack, err := message.ParsePubAck(frame, payload)
 				if err != nil {
 					log.Debug("malformed packet: failed to decode to PUBACK packet: ", err)
 					continue
@@ -205,14 +193,14 @@ func (c *Client) mainLoop() {
 				delete(c.sessions, ack.PacketId)
 			case message.PUBLISH:
 				log.Debug("PUBLISH message received")
-				pb, err := message.ParsePublish(packet.Frame, packet.Payload)
+				pb, err := message.ParsePublish(frame, payload)
 				if err != nil {
 					log.Debug("malformed packet: failed to decode to PUBLISH packet: ", err)
 					continue
 				}
 				c.Message <- pb
 			case message.PUBREC:
-				ack, err := message.ParsePubRec(packet.Frame, packet.Payload)
+				ack, err := message.ParsePubRec(frame, payload)
 				if err != nil {
 					log.Debug("malformed packet: failed to decode to PUBREC packet: ", err)
 					continue
@@ -225,7 +213,7 @@ func (c *Client) mainLoop() {
 				sess.Channel <- ack
 				delete(c.sessions, ack.PacketId)
 			case message.PUBCOMP:
-				ack, err := message.ParsePubComp(packet.Frame, packet.Payload)
+				ack, err := message.ParsePubComp(frame, payload)
 				if err != nil {
 					log.Debug("malformed packet: failed to decode to PUBCOMP packet: ", err)
 					continue
@@ -262,8 +250,8 @@ func (c *Client) runSession(packetId uint16, mt message.MessageType, e message.E
 	// Send encoded packet
 	if buf, err := e.Encode(); err != nil {
 		return nil, err
-	} else {
-		c.outgoing <- buf
+	} else if err := c.sendPacket(buf); err != nil {
+		return nil, err
 	}
 	// wait or timeout
 	select {
@@ -272,7 +260,7 @@ func (c *Client) runSession(packetId uint16, mt message.MessageType, e message.E
 	case ack := <-recv:
 		return ack, nil
 	}
-	return nil, errors.New("unpecxted logic")
+	return nil, errors.New("unreachable code")
 }
 
 func (c *Client) Subscribe(topic string, qos message.QoSLevel) error {
@@ -286,13 +274,15 @@ func (c *Client) Subscribe(topic string, qos message.QoSLevel) error {
 		QoS:       qos,
 	})
 
+	log.Debug("send subscribe")
 	if ack, err := c.runSession(packetId, message.SUBACK, ss); err != nil {
 		log.Debug("failed to finish session: ", err)
 		return err
 	} else if _, ok := ack.(*message.SubAck); !ok {
 		log.Debug("unexpected ack received")
-		return errors.New("unpected ack received")
+		return errors.New("unexpected ack received")
 	}
+	log.Debug("sent subscribe")
 	return nil
 }
 
@@ -306,8 +296,9 @@ func (c *Client) Publish(topic string, qos message.QoSLevel, body []byte) error 
 		if buf, err := p.Encode(); err != nil {
 			log.Debug("failed to encode publish with QoS0 ", err)
 			return err
-		} else {
-			c.outgoing <- buf
+		} else if c.sendPacket(buf); err != nil {
+			log.Debug("failed to send publish with QoS0 ", err)
+			return err
 		}
 	case message.QoS1:
 		packetId := c.makePacketId()

@@ -3,6 +3,7 @@ package broker
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -18,48 +19,60 @@ type Client struct {
 	id        string
 	ctx       context.Context
 	conn      net.Conn
-	timeout   *time.Ticker
+	timeout   *time.Timer
 	Packet    chan *message.Packet
 	Publisher chan []byte
 	send      chan []byte
 	terminate context.CancelFunc
 
-	once   sync.Once
-	writer *bufio.Writer
-	info   message.Connect
-	mu     sync.Mutex
+	once         sync.Once
+	writer       *bufio.Writer
+	info         message.Connect
+	mu           sync.Mutex
+	broker       *Broker
+	pingInterval time.Duration
 }
 
-func NewClient(conn net.Conn, ctx context.Context) *Client {
+func NewClient(conn net.Conn, info message.Connect, ctx context.Context, b *Broker) *Client {
 	c, cancel := context.WithCancel(ctx)
-	return &Client{
-		id:        uuid.NewV4().String(),
-		conn:      conn,
-		ctx:       c,
-		terminate: cancel,
-		Packet:    make(chan *message.Packet),
-		Publisher: make(chan []byte, 1),
-		send:      make(chan []byte),
+	var pingInterval time.Duration
+	if info.KeepAlive > 0 {
+		pingInterval = time.Duration(info.KeepAlive)
+	} else {
+		pingInterval = time.Duration(defaultKeepAlive) * time.Second
 	}
+
+	client := &Client{
+		id:           uuid.NewV4().String(),
+		conn:         conn,
+		ctx:          c,
+		terminate:    cancel,
+		Publisher:    make(chan []byte),
+		send:         make(chan []byte),
+		info:         info,
+		broker:       b,
+		pingInterval: pingInterval,
+		timeout:      time.AfterFunc(pingInterval, cancel),
+	}
+
+	go client.loop()
+	go func() {
+		for {
+			select {
+			case msg := <-client.Publisher:
+				client.sendPacket(msg)
+			}
+		}
+	}()
+	return client
 }
 
 func (c *Client) Closed() <-chan struct{} {
 	return c.ctx.Done()
 }
 
-func (c *Client) Timeout() <-chan time.Time {
-	if c.timeout == nil {
-		return nil
-	}
-	return c.timeout.C
-}
-
 func (c *Client) Id() string {
 	return c.id
-}
-
-func (c *Client) Read(b []byte) (int, error) {
-	return c.conn.Read(b)
 }
 
 func (c *Client) Close() {
@@ -72,145 +85,89 @@ func (c *Client) Close() {
 	})
 }
 
-func (c *Client) Handshake(timeout time.Duration) (err error) {
-	c.conn.SetDeadline(time.Now().Add(timeout))
-	var (
-		reason  message.ReasonCode
-		frame   *message.Frame
-		payload []byte
-		cn      *message.Connect
-	)
-	defer func() {
-		log.Debug("defer: send CONNACK")
-		ack := message.NewConnAck(reason)
+func (c *Client) loop() {
+	for {
+		frame, payload, err := message.ReceiveFrame(c.conn)
 		if err != nil {
-			ack.Property = &message.ConnAckProperty{
-				ReasonString: err.Error(),
+			c.terminate()
+			return
+		}
+		log.Debug("client packet received")
+		if frame == nil {
+			log.Debug("Received empty frame packet")
+			continue
+		}
+		var ack message.Encoder
+		switch frame.Type {
+		case message.PINGREQ:
+			if _, err := message.ParsePingReq(frame, payload); err != nil {
+				log.Debugf("failed to parse packet to PINGREQ: %s\n", err.Error())
+				return
 			}
+			log.Debug("client PINGREQ received")
+
+			// Enhanced expiration
+			c.timeout.Reset(c.pingInterval)
+			ack = message.NewPingResp()
+		case message.SUBSCRIBE:
+			ss, err := message.ParseSubscribe(frame, payload)
+			if err != nil {
+				log.Debugf("failed to parse packet to SUBSCRIBE: %s\n", err.Error())
+				return
+			}
+			log.Debug("client SUBSCRIBE received")
+			ack, err = c.broker.subscribe(c, ss)
+			if err != nil {
+				log.Debugf("failed to add subscribe: %s\n", err.Error())
+				return
+			}
+		case message.PUBLISH:
+			pb, err := message.ParsePublish(frame, payload)
+			if err != nil {
+				log.Debugf("failed to parse packet to PUBLISH: %s\n", err.Error())
+				return
+			}
+			ack, err = c.broker.publish(pb)
+			if err != nil {
+				log.Debugf("failed to publish message: %s\n", err.Error())
+				return
+			} else if ack == nil {
+				log.Debug("ack is nil due to Qos0")
+				continue
+			}
+		default:
+			log.Debugf("not implement packet type: %d\n", frame.Type)
+			continue
+		}
+
+		// If client need to send ack message, send it
+		if ack == nil {
+			continue
 		}
 		if buf, err := ack.Encode(); err != nil {
-			log.Debug("CONNACK encode error: ", err)
+			log.Debugf("failed to encode ack packet: %s\n", err.Error())
+			return
 		} else {
-			c.Send(buf)
+			log.Debug("Sending ack packet to the client")
+			c.sendPacket(buf)
 		}
-		c.conn.SetDeadline(time.Time{})
-	}()
-
-	frame, payload, err = message.ReceiveFrame(c)
-	if err != nil {
-		log.Debug("receive frame error: ", err)
-		reason = message.MalformedPacket
-		return err
 	}
-	cn, err = message.ParseConnect(frame, payload)
-	if err != nil {
-		reason = message.MalformedPacket
-		log.Debug("frame expects connect package: ", err)
-		return err
-	}
-	c.info = *cn
-	log.Debugf("CONNECT accepted: %+v\n", cn)
-	reason = message.Success
-	return nil
-}
-
-func (c *Client) readLoop() {
-	var to time.Duration
-	if c.info.KeepAlive > 0 {
-		to = time.Duration(c.info.KeepAlive)
-	} else {
-		to = time.Duration(defaultKeepAlive)
-	}
-
-	c.timeout = time.NewTicker(to * time.Second)
-
-	for {
-		frame, payload, err := message.ReceiveFrame(c)
-		if err != nil {
-			c.Close()
-		}
-		log.Debug("readLoop(); packet received")
-		c.Packet <- message.NewPacket(frame, payload)
-	}
-}
-
-func (c *Client) Send(m []byte) {
-	if c.writer == nil {
-		go c.writeLoop()
-	}
-	c.send <- m
 }
 
 func (c *Client) sendPacket(m []byte) error {
 	c.mu.Lock()
-	defer func() {
-		time.Sleep(100 * time.Microsecond)
-		c.mu.Unlock()
-	}()
+	defer c.mu.Unlock()
 
-	if _, err := c.writer.Write(m); err != nil {
+	w := bufio.NewWriter(c.conn)
+	if n, err := w.Write(m); err != nil {
 		log.Debug("failed to write packet: ", m)
 		return err
-	} else if err := c.writer.Flush(); err != nil {
+	} else if n != len(m) {
+		log.Debug("failed to write enough packet: ", m)
+		return fmt.Errorf("failed to write enough packet")
+	} else if err := w.Flush(); err != nil {
 		log.Debug("failed to flush packet: ", m)
 		return err
 	}
 	return nil
-}
-
-func (c *Client) writeLoop() {
-	log.Debug("Start write loop")
-	c.writer = bufio.NewWriter(c.conn)
-	for {
-		select {
-		case <-c.Closed():
-			c.Close()
-			return
-		case buf := <-c.send:
-			log.Debug("accept send buffer")
-			if err := c.sendPacket(buf); err != nil {
-				log.Debugf("socket write error: %s", err.Error())
-				// Backoff when error is temporary net error
-				if ne, ok := err.(net.Error); ok {
-					if ne.Temporary() {
-						log.Debugf("socket error is temporary, backoff")
-						time.Sleep(10 * time.Millisecond)
-						c.Send(buf)
-						break
-					}
-				}
-			}
-			log.Debug("buffer sent successfuuly")
-		case buf := <-c.Publisher:
-			log.Debug("Received buffer from publisher")
-			if err := c.sendPacket(buf); err != nil {
-				log.Debugf("socket write error: %s", err.Error())
-				// Backoff when error is temporary net error
-				if ne, ok := err.(net.Error); ok {
-					if ne.Temporary() {
-						log.Debugf("socket error is temporary, backoff")
-						time.Sleep(10 * time.Millisecond)
-						c.Send(buf)
-						break
-					}
-				}
-			}
-			log.Debug("client published successfuuly")
-		}
-	}
-}
-
-func (c *Client) Ping() {
-	if c.timeout != nil {
-		c.timeout.Stop()
-	}
-	var to time.Duration
-	if c.info.KeepAlive > 0 {
-		to = time.Duration(c.info.KeepAlive)
-	} else {
-		to = time.Duration(defaultKeepAlive)
-	}
-	c.timeout = time.NewTicker(to * time.Second)
-	pr, _ := message.NewPingResp().Encode()
-	c.Send(pr)
 }

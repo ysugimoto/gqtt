@@ -16,9 +16,10 @@ func formatTopicPath(path string) string {
 	return "/" + strings.Trim(path, "/")
 }
 
+var clients = make(map[string]chan []byte)
+
 type Broker struct {
 	port         int
-	clients      map[string]chan []byte
 	subscription *Subscription
 
 	mu sync.Mutex
@@ -27,7 +28,6 @@ type Broker struct {
 func NewBroker(port int) *Broker {
 	return &Broker{
 		port:         port,
-		clients:      make(map[string]chan []byte),
 		subscription: NewSubscription(),
 	}
 }
@@ -48,102 +48,79 @@ func (b *Broker) ListenAndServe(ctx context.Context) error {
 			continue
 		}
 
-		go b.handleConnection(s, ctx)
+		if info, err := b.handshake(s, 10*time.Second); err != nil {
+			log.Debug("Failed to MQTT handshake: %s", err.Error())
+			s.Close()
+			continue
+		} else {
+			client := NewClient(s, *info, ctx, b)
+			go b.handleConnection(client)
+		}
 	}
 	return nil
 }
 
-func (b *Broker) handleConnection(conn net.Conn, ctx context.Context) {
-	client := NewClient(conn, ctx)
+func (b *Broker) handshake(conn net.Conn, timeout time.Duration) (*message.Connect, error) {
+	conn.SetDeadline(time.Now().Add(timeout))
+	var (
+		err     error
+		reason  message.ReasonCode
+		frame   *message.Frame
+		payload []byte
+		cn      *message.Connect
+	)
+	defer func() {
+		log.Debug("defer: send CONNACK")
+		ack := message.NewConnAck(reason)
+		if err != nil {
+			ack.Property = &message.ConnAckProperty{
+				ReasonString: err.Error(),
+			}
+		}
+		if buf, err := ack.Encode(); err != nil {
+			log.Debug("CONNACK encode error: ", err)
+		} else {
+			conn.Write(buf)
+		}
+		conn.SetDeadline(time.Time{})
+	}()
+
+	frame, payload, err = message.ReceiveFrame(conn)
+	if err != nil {
+		log.Debug("receive frame error: ", err)
+		reason = message.MalformedPacket
+		return nil, err
+	}
+	cn, err = message.ParseConnect(frame, payload)
+	if err != nil {
+		reason = message.MalformedPacket
+		log.Debug("frame expects connect package: ", err)
+		return nil, err
+	}
+	reason = message.Success
+	log.Debugf("CONNECT accepted: %+v\n", cn)
+	return cn, nil
+}
+
+func (b *Broker) handleConnection(client *Client) {
+	b.addClient(client)
+
 	defer func() {
 		log.Debug("============================ Client closing =======================")
 		b.removeClient(client.Id())
 		client.Close()
 	}()
 
-	if err := client.Handshake(10 * time.Second); err != nil {
-		log.Debug("Failed to MQTT handshake: %s", err.Error())
-		return
-	}
-
-	// Add start read/write thread loop
-	go client.readLoop()
-
-	// And message passing between server <-> client
-	b.addClient(client.Id(), client.Publisher)
-
 	for {
 		select {
 		case <-client.Closed():
 			log.Debug("client context has been canceled")
 			return
-		case <-client.Timeout():
-			log.Debug("client keep alive has been expired")
-			return
-		case packet := <-client.Packet:
-			log.Debug("client packet received")
-			if packet.Frame == nil {
-				log.Debug("Received empty frame packet")
-				continue
-			}
-			switch packet.Frame.Type {
-			case message.PINGREQ:
-				if _, err := message.ParsePingReq(packet.Frame, packet.Payload); err != nil {
-					log.Debugf("failed to parse packet to PINGREQ: %s\n", err.Error())
-					return
-				}
-				log.Debug("client PINGREQ received")
-				client.Ping()
-			case message.SUBSCRIBE:
-				ss, err := message.ParseSubscribe(packet.Frame, packet.Payload)
-				if err != nil {
-					log.Debugf("failed to parse packet to SUBSCRIBE: %s\n", err.Error())
-					return
-				}
-				log.Debug("client SUBSCRIBE received")
-				rcs := []message.ReasonCode{}
-				for _, t := range ss.Subscriptions {
-					rcs = append(rcs, b.subscription.Add(client.Id(), t))
-				}
-				ack := message.NewSubAck(ss.PacketId, rcs...)
-
-				if buf, err := ack.Encode(); err != nil {
-					log.Debugf("failed to encode SUBACK packet: %s\n", err.Error())
-					return
-				} else {
-					log.Debug("Sending SUBACK packet to the client")
-					client.Send(buf)
-				}
-			case message.PUBLISH:
-				log.Debug("receive PUBLISH packet: ", packet.Payload)
-				pb, err := message.ParsePublish(packet.Frame, packet.Payload)
-				if err != nil {
-					log.Debugf("failed to parse packet to PUBLISH: %s\n", err.Error())
-					return
-				}
-				ack, err := b.publishMessage(pb)
-				if err != nil {
-					log.Debugf("failed to publish message: %s\n", err.Error())
-					return
-				} else if ack == nil {
-					log.Debug("ack is nil due to Qos0")
-					continue
-				}
-				if buf, err := ack.Encode(); err != nil {
-					log.Debugf("failed to encode PUBACK/PUBREC packet: %s\n", err.Error())
-					return
-				} else {
-					log.Debug("Sending PUBACK/PUBREC packet to the client")
-					client.Send(buf)
-				}
-			default:
-				log.Debugf("not implement packet type: %d\n", packet.Frame.Type)
-			}
 		}
 	}
 }
 
-func (b *Broker) publishMessage(pb *message.Publish) (message.Encoder, error) {
+func (b *Broker) publish(pb *message.Publish) (message.Encoder, error) {
 	ids := b.subscription.FindAll(pb.TopicName)
 	log.Debugf("targets: %+v\n", ids)
 	if len(ids) > 0 {
@@ -154,9 +131,9 @@ func (b *Broker) publishMessage(pb *message.Publish) (message.Encoder, error) {
 		}
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		log.Debugf("current clients: %+v\n", b.clients)
+		log.Debugf("current clients: %+v\n", clients)
 		for _, id := range ids {
-			if c, ok := b.clients[id]; ok {
+			if c, ok := clients[id]; ok {
 				log.Debugf("send publish message to: %s\n", id)
 				c <- buf
 			} else {
@@ -177,18 +154,27 @@ func (b *Broker) publishMessage(pb *message.Publish) (message.Encoder, error) {
 	}
 }
 
-func (b *Broker) addClient(clientId string, publisher chan []byte) {
+func (b *Broker) subscribe(client *Client, ss *message.Subscribe) (message.Encoder, error) {
+	rcs := []message.ReasonCode{}
+	// TODO: confirm subscription settings e.g. max QoS, ...
+	for _, t := range ss.Subscriptions {
+		rcs = append(rcs, b.subscription.Add(client.Id(), t))
+	}
+	return message.NewSubAck(ss.PacketId, rcs...), nil
+}
+
+func (b *Broker) addClient(client *Client) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.clients[clientId] = publisher
+	clients[client.Id()] = client.Publisher
 }
 
 func (b *Broker) removeClient(clientId string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if c, ok := b.clients[clientId]; ok {
+	if c, ok := clients[clientId]; ok {
 		close(c)
-		delete(b.clients, clientId)
+		delete(clients, clientId)
 		b.subscription.Unsubscribe(clientId)
 	}
 }
