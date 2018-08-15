@@ -16,7 +16,7 @@ func formatTopicPath(path string) string {
 	return "/" + strings.Trim(path, "/")
 }
 
-var clients = make(map[string]chan []byte)
+var clients = make(map[string]chan message.Encoder)
 
 type Broker struct {
 	port         int
@@ -48,15 +48,16 @@ func (b *Broker) ListenAndServe(ctx context.Context) error {
 			continue
 		}
 
-		if info, err := b.handshake(s, 10*time.Second); err != nil {
+		info, err := b.handshake(s, 10*time.Second)
+		if err != nil {
 			log.Debug("Failed to MQTT handshake: %s", err.Error())
 			s.Close()
 			continue
-		} else {
-			client := NewClient(s, *info, ctx, b)
-			go b.handleConnection(client)
 		}
+		client := NewClient(s, *info, ctx, b)
+		go b.handleConnection(client)
 	}
+
 	return nil
 }
 
@@ -124,18 +125,13 @@ func (b *Broker) publish(pb *message.Publish) (message.Encoder, error) {
 	ids := b.subscription.FindAll(pb.TopicName)
 	log.Debugf("targets: %+v\n", ids)
 	if len(ids) > 0 {
-		buf, err := pb.Encode()
-		if err != nil {
-			log.Debug("failed to encode publish message: ", err)
-			return nil, err
-		}
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		log.Debugf("current clients: %+v\n", clients)
 		for _, id := range ids {
 			if c, ok := clients[id]; ok {
 				log.Debugf("send publish message to: %s\n", id)
-				c <- buf
+				c <- pb
 			} else {
 				log.Debugf("client %s not found\n", id)
 			}

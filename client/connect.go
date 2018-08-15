@@ -12,29 +12,41 @@ import (
 	"github.com/ysugimoto/gqtt/message"
 )
 
-func connect(u *url.URL, opt *ClientOption) (net.Conn, *ServerInfo, error) {
+func connect(u string, opt *ClientOption) (net.Conn, *ServerInfo, error) {
 	var (
-		conn net.Conn
-		err  error
+		conn   net.Conn
+		err    error
+		parsed *url.URL
+		info   *ServerInfo
 	)
-	if u.Scheme == "mqtts" {
-		conn, err = tls.Dial("tcp", u.Host, &tls.Config{
-			ServerName: u.Host,
-		})
-	} else {
-		conn, err = net.Dial("tcp", u.Host)
-	}
+
+	parsed, err = url.Parse(u)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if info, err := handshake(conn, opt); err != nil {
+	switch parsed.Scheme {
+	case "mqtt":
+		if conn, err = net.Dial("tcp", parsed.Host); err != nil {
+			return nil, nil, err
+		}
+	case "mqtts":
+		conf := &tls.Config{
+			ServerName: parsed.Host,
+		}
+		if conn, err = tls.Dial("tcp", parsed.Host, conf); err != nil {
+			return nil, nil, err
+		}
+	default:
+		return nil, nil, errors.New("connection protocol must start with mqtt(s)://")
+	}
+
+	if info, err = handshake(conn, opt); err != nil {
 		log.Debug("failed to handshake with server: ", err)
 		conn.Close()
 		return nil, nil, err
-	} else {
-		return conn, info, nil
 	}
+	return conn, info, nil
 }
 
 func handshake(conn net.Conn, opt *ClientOption) (*ServerInfo, error) {
@@ -81,7 +93,6 @@ func handshake(conn net.Conn, opt *ClientOption) (*ServerInfo, error) {
 		log.Debug("not implement yet for AUTH packet")
 		return nil, errors.New("not implement yet for AUTH packet")
 	default:
-		break
+		return nil, errors.New("unexpected frame received on handhshake")
 	}
-	return nil, errors.New("unexpected frame received on handhshake")
 }

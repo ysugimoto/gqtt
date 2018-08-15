@@ -20,13 +20,10 @@ type Client struct {
 	ctx       context.Context
 	conn      net.Conn
 	timeout   *time.Timer
-	Packet    chan *message.Packet
-	Publisher chan []byte
-	send      chan []byte
+	Publisher chan message.Encoder
 	terminate context.CancelFunc
 
 	once         sync.Once
-	writer       *bufio.Writer
 	info         message.Connect
 	mu           sync.Mutex
 	broker       *Broker
@@ -34,36 +31,37 @@ type Client struct {
 }
 
 func NewClient(conn net.Conn, info message.Connect, ctx context.Context, b *Broker) *Client {
-	c, cancel := context.WithCancel(ctx)
-	var pingInterval time.Duration
-	if info.KeepAlive > 0 {
-		pingInterval = time.Duration(info.KeepAlive)
-	} else {
-		pingInterval = time.Duration(defaultKeepAlive) * time.Second
-	}
-
 	client := &Client{
-		id:           uuid.NewV4().String(),
-		conn:         conn,
-		ctx:          c,
-		terminate:    cancel,
-		Publisher:    make(chan []byte),
-		send:         make(chan []byte),
-		info:         info,
-		broker:       b,
-		pingInterval: pingInterval,
-		timeout:      time.AfterFunc(pingInterval, cancel),
+		id:        uuid.NewV4().String(),
+		conn:      conn,
+		Publisher: make(chan message.Encoder),
+		info:      info,
+		broker:    b,
 	}
+	client.ctx, client.terminate = context.WithCancel(ctx)
+	if info.KeepAlive > 0 {
+		client.pingInterval = time.Duration(info.KeepAlive) * time.Second
+	} else {
+		client.pingInterval = time.Duration(defaultKeepAlive) * time.Second
+	}
+	log.Debug(client.pingInterval)
+	client.timeout = time.AfterFunc(client.pingInterval, client.terminate)
 
-	go client.loop()
 	go func() {
 		for {
 			select {
 			case msg := <-client.Publisher:
-				client.sendPacket(msg)
+				if msg == nil {
+					return
+				}
+				if err := client.sendMessage(msg); err != nil {
+					client.Close()
+				}
 			}
 		}
 	}()
+	go client.loop()
+
 	return client
 }
 
@@ -79,17 +77,17 @@ func (c *Client) Close() {
 	c.once.Do(func() {
 		c.terminate()
 		c.conn.Close()
-		if c.timeout != nil {
-			c.timeout.Stop()
-		}
+		c.timeout.Stop()
 	})
 }
 
 func (c *Client) loop() {
+	defer c.terminate()
+
 	for {
 		frame, payload, err := message.ReceiveFrame(c.conn)
 		if err != nil {
-			c.terminate()
+			log.Debug("client packet receive failed")
 			return
 		}
 		log.Debug("client packet received")
@@ -106,7 +104,7 @@ func (c *Client) loop() {
 			}
 			log.Debug("client PINGREQ received")
 
-			// Enhanced expiration
+			// Extend expiration
 			c.timeout.Reset(c.pingInterval)
 			ack = message.NewPingResp()
 		case message.SUBSCRIBE:
@@ -141,32 +139,34 @@ func (c *Client) loop() {
 		}
 
 		// If client need to send ack message, send it
-		if ack == nil {
-			continue
-		}
-		if buf, err := ack.Encode(); err != nil {
-			log.Debugf("failed to encode ack packet: %s\n", err.Error())
-			return
-		} else {
-			log.Debug("Sending ack packet to the client")
-			c.sendPacket(buf)
+		if ack != nil {
+			if err := c.sendMessage(ack); err != nil {
+				log.Debug("failed to send message packet: ", err)
+				return
+			}
 		}
 	}
 }
 
-func (c *Client) sendPacket(m []byte) error {
+func (c *Client) sendMessage(m message.Encoder) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	w := bufio.NewWriter(c.conn)
-	if n, err := w.Write(m); err != nil {
-		log.Debug("failed to write packet: ", m)
+	buf, err := m.Encode()
+	if err != nil {
+		log.Debugf("failed to encode ack packet: %s\n", err.Error())
 		return err
-	} else if n != len(m) {
-		log.Debug("failed to write enough packet: ", m)
+	}
+
+	w := bufio.NewWriter(c.conn)
+	if n, err := w.Write(buf); err != nil {
+		log.Debug("failed to write packet: ", buf)
+		return err
+	} else if n != len(buf) {
+		log.Debug("failed to write enough packet: ", buf)
 		return fmt.Errorf("failed to write enough packet")
 	} else if err := w.Flush(); err != nil {
-		log.Debug("failed to flush packet: ", m)
+		log.Debug("failed to flush packet: ", buf)
 		return err
 	}
 	return nil

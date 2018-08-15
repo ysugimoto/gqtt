@@ -7,7 +7,6 @@ import (
 	"github.com/ysugimoto/gqtt/internal/log"
 	"github.com/ysugimoto/gqtt/message"
 	"net"
-	"net/url"
 	"sync"
 	"time"
 )
@@ -25,15 +24,12 @@ func NewClientOption() *ClientOption {
 }
 
 type Client struct {
-	pid          uint16
+	packetId     uint16
 	url          string
 	conn         net.Conn
 	ctx          context.Context
 	terminate    context.CancelFunc
-	incoming     chan *message.Packet
 	sessions     map[uint16]session
-	outgoing     chan []byte
-	writer       *bufio.Writer
 	pingInterval *time.Ticker
 
 	Closed  chan struct{}
@@ -55,25 +51,15 @@ func (c *Client) Connect(ctx context.Context) error {
 }
 
 func (c *Client) ConnectWithOption(ctx context.Context, opt *ClientOption) error {
-	parsed, err := url.Parse(c.url)
-	if err != nil {
-		return err
-	} else if parsed.Scheme != "mqtt" && parsed.Scheme != "mqtts" {
-		return errors.New("connection protocol must start with mqtt(s)://")
-	}
+	var err error
 
-	conn, si, err := connect(parsed, opt)
-	if err != nil {
+	if c.conn, c.ServerInfo, err = connect(c.url, opt); err != nil {
 		return err
 	}
 
 	log.Debug("connection established!")
 
-	c.conn = conn
-	c.ServerInfo = si
 	c.ctx, c.terminate = context.WithCancel(ctx)
-	c.incoming = make(chan *message.Packet)
-	c.outgoing = make(chan []byte)
 	c.Closed = make(chan struct{})
 	c.sessions = make(map[uint16]session)
 	c.Message = make(chan *message.Publish)
@@ -101,8 +87,6 @@ func (c *Client) Disconnect() {
 	c.once.Do(func() {
 		log.Debug("============================ Client closing =======================")
 		c.pingInterval.Stop()
-		close(c.outgoing)
-		close(c.incoming)
 
 		dc, err := message.NewDisconnect(message.NormalDisconnection).Encode()
 		if err != nil {
@@ -231,11 +215,11 @@ func (c *Client) mainLoop() {
 }
 
 func (c *Client) makePacketId() uint16 {
-	if c.pid == 0xFFFF {
-		c.pid = 0
+	if c.packetId == 0xFFFF {
+		c.packetId = 0
 	}
-	c.pid++
-	return c.pid
+	c.packetId++
+	return c.packetId
 }
 
 func (c *Client) runSession(packetId uint16, mt message.MessageType, e message.Encoder) (interface{}, error) {
