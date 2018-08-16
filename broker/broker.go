@@ -57,8 +57,6 @@ func (b *Broker) ListenAndServe(ctx context.Context) error {
 		client := NewClient(s, *info, ctx, b)
 		go b.handleConnection(client)
 	}
-
-	return nil
 }
 
 func (b *Broker) handshake(conn net.Conn, timeout time.Duration) (*message.Connect, error) {
@@ -122,18 +120,17 @@ func (b *Broker) handleConnection(client *Client) {
 }
 
 func (b *Broker) publish(pb *message.Publish) (message.Encoder, error) {
-	ids := b.subscription.FindAll(pb.TopicName)
-	log.Debugf("targets: %+v\n", ids)
-	if len(ids) > 0 {
+	clientQoS := b.subscription.GetClientsByTopic(pb.TopicName)
+	if len(clientQoS) > 0 {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		log.Debugf("current clients: %+v\n", clients)
-		for _, id := range ids {
-			if c, ok := clients[id]; ok {
-				log.Debugf("send publish message to: %s\n", id)
+
+		for cid, _ := range clientQoS {
+			if c, ok := clients[cid]; ok {
+				log.Debugf("send publish message to: %s\n", cid)
 				c <- pb
 			} else {
-				log.Debugf("client %s not found\n", id)
+				log.Debugf("client %s not found\n", cid)
 			}
 		}
 	}
@@ -154,7 +151,11 @@ func (b *Broker) subscribe(client *Client, ss *message.Subscribe) (message.Encod
 	rcs := []message.ReasonCode{}
 	// TODO: confirm subscription settings e.g. max QoS, ...
 	for _, t := range ss.Subscriptions {
-		rcs = append(rcs, b.subscription.Add(client.Id(), t))
+		rc, err := b.subscription.Subscribe(client.Id(), t)
+		if err != nil {
+			return nil, err
+		}
+		rcs = append(rcs, rc)
 	}
 	return message.NewSubAck(ss.PacketId, rcs...), nil
 }
@@ -171,6 +172,6 @@ func (b *Broker) removeClient(clientId string) {
 	if c, ok := clients[clientId]; ok {
 		close(c)
 		delete(clients, clientId)
-		b.subscription.RemoveAll(clientId)
+		b.subscription.UnsubscribeAll(clientId)
 	}
 }

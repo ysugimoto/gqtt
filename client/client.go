@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"github.com/ysugimoto/gqtt/internal/log"
@@ -70,11 +69,11 @@ func (c *Client) ConnectWithOption(ctx context.Context, opt *ClientOption) error
 		for {
 			select {
 			case <-c.ctx.Done():
+				c.Disconnect()
 				return
 			case <-c.pingInterval.C:
 				log.Debug("ping interval is coming. send ping to server")
-				ping, _ := message.NewPingReq().Encode()
-				c.sendPacket(ping)
+				c.sendMessage(message.NewPingReq())
 			}
 		}
 	}()
@@ -88,12 +87,9 @@ func (c *Client) Disconnect() {
 		log.Debug("============================ Client closing =======================")
 		c.pingInterval.Stop()
 
-		dc, err := message.NewDisconnect(message.NormalDisconnection).Encode()
-		if err != nil {
-			log.Debug("failed to encode DISCONNECT message: ", err)
-		} else {
-			c.sendPacket(dc)
-			log.Debug("Send DISCONNECT")
+		dc := message.NewDisconnect(message.NormalDisconnection)
+		if err := c.sendMessage(dc); err != nil {
+			log.Debug("failed to send DISCONNECT message: ", err)
 		}
 		log.Debug("Closing connection")
 		c.conn.Close()
@@ -103,20 +99,27 @@ func (c *Client) Disconnect() {
 	})
 }
 
-func (c *Client) sendPacket(m []byte) error {
+func (c *Client) sendMessage(m message.Encoder) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer func() {
+		// This is a trick for sending mutex blocked message queue properly.
+		// Wait a tiny microseconds before unlock mutex, it makes socket accepts to write next packet again.
+		time.Sleep(10 * time.Microsecond)
+		c.mu.Unlock()
+	}()
 
-	w := bufio.NewWriter(c.conn)
-	if n, err := w.Write(m); err != nil {
-		log.Debug("failed to write packet: ", m)
+	buf, err := m.Encode()
+	if err != nil {
+		log.Debug("failed to encode message ", err)
 		return err
-	} else if n != len(m) {
+	}
+
+	if n, err := c.conn.Write(buf); err != nil {
+		log.Debug("failed to write packet: ", buf)
+		return err
+	} else if n != len(buf) {
 		log.Debug("could not enough patck")
 		return errors.New("could not write enough packet")
-	} else if err := w.Flush(); err != nil {
-		log.Debug("failed to flush packet: ", m)
-		return err
 	}
 	return nil
 }
@@ -222,7 +225,7 @@ func (c *Client) makePacketId() uint16 {
 	return c.packetId
 }
 
-func (c *Client) runSession(packetId uint16, mt message.MessageType, e message.Encoder) (interface{}, error) {
+func (c *Client) runSession(packetId uint16, mt message.MessageType, msg message.Encoder) (interface{}, error) {
 	recv := make(chan interface{})
 	c.sessions[packetId] = session{
 		Type:    mt,
@@ -231,10 +234,8 @@ func (c *Client) runSession(packetId uint16, mt message.MessageType, e message.E
 	ctx, timeout := context.WithTimeout(c.ctx, 10*time.Second)
 	defer timeout()
 
-	// Send encoded packet
-	if buf, err := e.Encode(); err != nil {
-		return nil, err
-	} else if err := c.sendPacket(buf); err != nil {
+	// Send message
+	if err := c.sendMessage(msg); err != nil {
 		return nil, err
 	}
 	// wait or timeout
@@ -244,7 +245,6 @@ func (c *Client) runSession(packetId uint16, mt message.MessageType, e message.E
 	case ack := <-recv:
 		return ack, nil
 	}
-	return nil, errors.New("unreachable code")
 }
 
 func (c *Client) Subscribe(topic string, qos message.QoSLevel) error {
@@ -271,25 +271,19 @@ func (c *Client) Subscribe(topic string, qos message.QoSLevel) error {
 }
 
 func (c *Client) Publish(topic string, qos message.QoSLevel, body []byte) error {
+	pb := message.NewPublish(0, message.WithQoS(qos))
+	pb.TopicName = topic
+	pb.Body = body
 	switch qos {
 	case message.QoS0:
 		// If OoS is zero, we don't need packet identifier and any acknowledgment
-		p := message.NewPublish(0, message.WithQoS(qos))
-		p.TopicName = topic
-		p.Body = body
-		if buf, err := p.Encode(); err != nil {
-			log.Debug("failed to encode publish with QoS0 ", err)
-			return err
-		} else if c.sendPacket(buf); err != nil {
+		if err := c.sendMessage(pb); err != nil {
 			log.Debug("failed to send publish with QoS0 ", err)
 			return err
 		}
 	case message.QoS1:
-		packetId := c.makePacketId()
-		p := message.NewPublish(packetId, message.WithQoS(qos))
-		p.TopicName = topic
-		p.Body = body
-		if ack, err := c.runSession(packetId, message.PUBACK, p); err != nil {
+		pb.PacketId = c.makePacketId()
+		if ack, err := c.runSession(pb.PacketId, message.PUBACK, pb); err != nil {
 			log.Debug("failed to publish session for OoS1: ", err)
 			return err
 		} else if _, ok := ack.(*message.PubAck); !ok {
@@ -298,11 +292,8 @@ func (c *Client) Publish(topic string, qos message.QoSLevel, body []byte) error 
 		}
 		// TODO: Need to save and delete message for QoS1
 	case message.QoS2:
-		packetId := c.makePacketId()
-		p := message.NewPublish(packetId, message.WithQoS(qos))
-		p.TopicName = topic
-		p.Body = body
-		if ack, err := c.runSession(packetId, message.PUBREC, p); err != nil {
+		pb.PacketId = c.makePacketId()
+		if ack, err := c.runSession(pb.PacketId, message.PUBREC, pb); err != nil {
 			log.Debug("failed to publish session for OoS2: ", err)
 			return err
 		} else if _, ok := ack.(*message.PubRec); !ok {
@@ -310,8 +301,8 @@ func (c *Client) Publish(topic string, qos message.QoSLevel, body []byte) error 
 			return errors.New("failed to type conversion fto PUBREC or OoS2")
 		}
 		// On QoS2, need to send more packet for PUBREL
-		pl := message.NewPubRel(packetId)
-		if ack, err := c.runSession(packetId, message.PUBCOMP, pl); err != nil {
+		pl := message.NewPubRel(pb.PacketId)
+		if ack, err := c.runSession(pb.PacketId, message.PUBCOMP, pl); err != nil {
 			log.Debug("failed to pubrel session for OoS2: ", err)
 			return err
 		} else if _, ok := ack.(*message.PubComp); !ok {
@@ -321,60 +312,3 @@ func (c *Client) Publish(topic string, qos message.QoSLevel, body []byte) error 
 	}
 	return nil
 }
-
-/*
-import (
-	"fmt"
-	//import the Paho Go MQTT library
-	MQTT "github.com/eclipse/paho.mqtt.golang"
-	"log"
-	"os"
-	"time"
-)
-
-//define a function for the default message handler
-var f MQTT.MessageHandler = func(client MQTT.Client, msg MQTT.Message) {
-	fmt.Printf("TOPIC: %s\n", msg.Topic())
-	fmt.Printf("MSG: %s\n", msg.Payload())
-}
-
-func main() {
-	MQTT.DEBUG = log.New(os.Stdout, "", 0)
-	//create a ClientOptions struct setting the broker address, clientid, turn
-	//off trace output and set the default message handler
-	opts := MQTT.NewClientOptions().AddBroker("tcp://localhost:9999")
-	opts.SetClientID("go-simple")
-	opts.SetDefaultPublishHandler(f)
-
-	//create and start a client using the above ClientOptions
-	c := MQTT.NewClient(opts)
-	if token := c.Connect(); token.Wait() && token.Error() != nil {
-		panic(token.Error())
-	}
-
-	//subscribe to the topic /go-mqtt/sample and request messages to be delivered
-	//at a maximum qos of zero, wait for the receipt to confirm the subscription
-	if token := c.Subscribe("go-mqtt/sample", 0, nil); token.Wait() && token.Error() != nil {
-		fmt.Println(token.Error())
-		os.Exit(1)
-	}
-
-	//Publish 5 messages to /go-mqtt/sample at qos 1 and wait for the receipt
-	//from the server after sending each message
-	for i := 0; i < 5; i++ {
-		text := fmt.Sprintf("this is msg #%d!", i)
-		token := c.Publish("go-mqtt/sample", 0, false, text)
-		token.Wait()
-	}
-
-	time.Sleep(3 * time.Second)
-
-	//unsubscribe from /go-mqtt/sample
-	if token := c.Unsubscribe("go-mqtt/sample"); token.Wait() && token.Error() != nil {
-		fmt.Println(token.Error())
-		os.Exit(1)
-	}
-
-	c.Disconnect(250)
-}
-*/

@@ -1,92 +1,145 @@
 package broker
 
 import (
+	"fmt"
+	"regexp"
+	"strings"
+	"sync"
+
 	"github.com/ysugimoto/gqtt/internal/log"
 	"github.com/ysugimoto/gqtt/message"
-	"sync"
 )
 
+type ClientQoS map[string]message.QoSLevel
+
 type Subscription struct {
-	topics map[string]map[string]struct{}
-	mu     sync.Mutex
+	topics sync.Map
 }
 
 func NewSubscription() *Subscription {
 	return &Subscription{
-		topics: map[string]map[string]struct{}{},
+		topics: sync.Map{},
 	}
 }
 
-func (s *Subscription) RemoveAll(clientId string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for n, cs := range s.topics {
-		if _, ok := cs[clientId]; ok {
-			delete(s.topics[n], clientId)
+func (s *Subscription) UnsubscribeAll(clientId string) {
+	s.topics.Range(func(k, v interface{}) bool {
+		m := v.(ClientQoS)
+		if _, ok := m[clientId]; ok {
+			delete(m, clientId)
 		}
-	}
+		return true
+	})
 }
 
 func (s *Subscription) Unsubscribe(clientId, topic string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for n, cs := range s.topics {
-		if n != topic {
-			continue
-		}
-		if _, ok := cs[clientId]; ok {
-			delete(s.topics[n], clientId)
-		}
+	v, ok := s.topics.Load(topic)
+	if !ok {
+		return
+	}
+	m := v.(ClientQoS)
+	if _, ok := m[clientId]; ok {
+		delete(m, clientId)
 	}
 }
 
-func (s *Subscription) Add(clientId string, t message.SubscribeTopic) message.ReasonCode {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if v, ok := s.topics[t.TopicName]; ok {
-		v[clientId] = struct{}{}
-	} else {
-		s.topics[t.TopicName] = map[string]struct{}{
-			clientId: struct{}{},
+func (s *Subscription) Subscribe(clientId string, t message.SubscribeTopic) (message.ReasonCode, error) {
+	targets, err := s.FindTopics(t.TopicName)
+	if err != nil {
+		return message.UnspecifiedError, err
+	} else if len(targets) == 0 {
+		// If target hasn't created yet, create new topic.
+		// But, topic name has wildcard, we'll skip it
+		if !strings.Contains(t.TopicName, "#") && !strings.Contains(t.TopicName, "+") {
+			targets = append(targets, t.TopicName)
+		} else {
+			return message.NoSubscriptionExisted, nil
 		}
 	}
-	log.Debugf("topic added for %s, all: %+v\n", t.TopicName, s.topics[t.TopicName])
+
+	for _, topic := range targets {
+		v, ok := s.topics.Load(topic)
+		var m ClientQoS
+		if !ok {
+			m = ClientQoS{}
+		} else {
+			m = v.(ClientQoS)
+		}
+		m[clientId] = t.QoS
+		s.topics.Store(topic, m)
+		log.Debugf("client %s subscribed top for %s\n", clientId, topic)
+	}
+
 	switch t.QoS {
 	case message.QoS0:
-		return message.GrantedQoS0
+		return message.GrantedQoS0, nil
 	case message.QoS1:
-		return message.GrantedQoS1
+		return message.GrantedQoS1, nil
 	case message.QoS2:
-		return message.GrantedQoS2
+		return message.GrantedQoS2, nil
 	default:
-		return message.UnspecifiedError
+		return message.QoSNotSupported, fmt.Errorf("Unexpected Qos")
 	}
 }
 
-func (s *Subscription) FindAll(topic string) []string {
-	ids := make([]string, 0)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	log.Debugf("find all clients fot topic: %s\n", topic)
-
-	stack := map[string]struct{}{}
-	for t, clients := range s.topics {
-		if t != topic {
-			continue
-		}
-		log.Debug("clients for topic: %s %+v\n", t, clients)
-		for c, _ := range clients {
-			if _, ok := stack[c]; ok {
-				continue
+func (s *Subscription) CompileTopicRegex(topic string) (*regexp.Regexp, error) {
+	// Validate multi-level wildcard (MLW) if exists
+	if mlw := strings.Index(topic, "#"); mlw != -1 {
+		// It's OK to use only MLW character
+		if topic != "#" {
+			// MLW must present after topic division character
+			if topic[mlw-1] != '/' {
+				return nil, fmt.Errorf("Multi-level wildcard must present after topic division chacater of `/`")
 			}
-			log.Debugf("client found: %s\n", c)
-			ids = append(ids, c)
-			stack[c] = struct{}{}
+			// MLW must present at last character of topic name
+			if mlw != len(topic)-1 {
+				return nil, fmt.Errorf("Multi-level wildcard must present at last character")
+			}
 		}
 	}
-	return ids
+	// Validate single-level wildcard (SLW) if exists
+	if slw := strings.Index(topic, "+"); slw != -1 {
+		// It's OK to use only SLW character
+		if topic != "+" {
+			// SLW must present after topic division character
+			if topic[slw-1] != '/' {
+				return nil, fmt.Errorf("Single-level wildcard must present after topic division chacater of `/`")
+			}
+		}
+	}
+
+	t := strings.Replace(topic, "+", "[^/]+", -1)
+	t = strings.Replace(t, "/#", ".*", -1)
+	t += "$"
+
+	return regexp.Compile(t)
+}
+
+func (s *Subscription) FindTopics(topic string) ([]string, error) {
+	// FIXME: Now we are using regexp in order to find matching topics easily.
+	r, err := s.CompileTopicRegex(topic)
+	if err != nil {
+		log.Debug("failed to compile regex: ", topic, err)
+		return nil, err
+	}
+	topics := []string{}
+	s.topics.Range(func(k, v interface{}) bool {
+		topicName := k.(string)
+		if r.MatchString(topicName) {
+			topics = append(topics, topicName)
+		}
+		return true
+	})
+	return topics, nil
+}
+
+func (s *Subscription) GetClientsByTopic(topic string) ClientQoS {
+	log.Debugf("find all clients fot topic: %s\n", topic)
+
+	v, ok := s.topics.Load(topic)
+	if !ok {
+		return ClientQoS{}
+	}
+	m := v.(ClientQoS)
+	return m
 }

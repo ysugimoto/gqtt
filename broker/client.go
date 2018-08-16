@@ -125,6 +125,7 @@ func (c *Client) loop() {
 				log.Debugf("failed to parse packet to PUBLISH: %s\n", err.Error())
 				return
 			}
+			log.Debugf("Publish message received from: %s, body: %s\n", c.Id(), string(pb.Body))
 			ack, err = c.broker.publish(pb)
 			if err != nil {
 				log.Debugf("failed to publish message: %s\n", err.Error())

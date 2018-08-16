@@ -5,11 +5,19 @@ import (
 	"github.com/ysugimoto/gqtt"
 	"github.com/ysugimoto/gqtt/message"
 	"log"
+	"os"
 	"time"
 )
 
 func main() {
+	var sig string = "default"
+	if len(os.Args) > 1 {
+		sig = os.Args[1]
+	}
+
 	client := gqtt.NewClient("mqtt://localhost:9999")
+	defer client.Disconnect()
+
 	ctx := context.Background()
 	if err := client.Connect(ctx); err != nil {
 		log.Fatal(err)
@@ -35,8 +43,8 @@ func main() {
 			log.Printf("published message received: %s\n", string(msg.Body))
 		case <-ticker.C:
 			log.Printf("message publish")
-			if err := client.Publish("gqtt/example", message.QoS0, []byte("Hello, MQTT5!")); err != nil {
-				log.Fatal(err)
+			if err := client.Publish("gqtt/example", message.QoS0, []byte("Hello, MQTT5! from "+sig)); err != nil {
+				return
 			}
 		}
 	}
