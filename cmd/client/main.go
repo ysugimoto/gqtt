@@ -29,7 +29,7 @@ func main() {
 	}
 	log.Println("subscribed")
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
 
 	for {
 		select {

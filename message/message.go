@@ -6,6 +6,7 @@ type (
 	ReasonCode   uint8
 	QoSLevel     uint8
 	Encoder      interface {
+		Duplicate()
 		Encode() ([]byte, error)
 	}
 )

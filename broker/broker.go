@@ -16,7 +16,7 @@ func formatTopicPath(path string) string {
 	return "/" + strings.Trim(path, "/")
 }
 
-var clients = make(map[string]chan message.Encoder)
+var clients = make(map[string]chan *message.Publish)
 
 type Broker struct {
 	port         int

@@ -1,9 +1,8 @@
 package broker
 
 import (
-	"bufio"
 	"context"
-	"fmt"
+	"errors"
 	"net"
 	"sync"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/satori/go.uuid"
 	"github.com/ysugimoto/gqtt/internal/log"
 	"github.com/ysugimoto/gqtt/message"
+	"github.com/ysugimoto/gqtt/session"
 )
 
 const defaultKeepAlive = 30
@@ -20,8 +20,9 @@ type Client struct {
 	ctx       context.Context
 	conn      net.Conn
 	timeout   *time.Timer
-	Publisher chan message.Encoder
+	Publisher chan *message.Publish
 	terminate context.CancelFunc
+	session   *session.Session
 
 	once         sync.Once
 	info         message.Connect
@@ -31,14 +32,17 @@ type Client struct {
 }
 
 func NewClient(conn net.Conn, info message.Connect, ctx context.Context, b *Broker) *Client {
+	cctx, terminate := context.WithCancel(ctx)
 	client := &Client{
 		id:        uuid.NewV4().String(),
 		conn:      conn,
-		Publisher: make(chan message.Encoder),
+		Publisher: make(chan *message.Publish),
 		info:      info,
 		broker:    b,
+		ctx:       cctx,
+		terminate: terminate,
+		session:   session.New(conn, cctx),
 	}
-	client.ctx, client.terminate = context.WithCancel(ctx)
 	if info.KeepAlive > 0 {
 		client.pingInterval = time.Duration(info.KeepAlive) * time.Second
 	} else {
@@ -50,11 +54,11 @@ func NewClient(conn net.Conn, info message.Connect, ctx context.Context, b *Brok
 	go func() {
 		for {
 			select {
-			case msg := <-client.Publisher:
-				if msg == nil {
+			case pb := <-client.Publisher:
+				if pb == nil {
 					return
 				}
-				if err := client.sendMessage(msg); err != nil {
+				if err := client.publish(pb); err != nil {
 					client.Close()
 				}
 			}
@@ -63,6 +67,42 @@ func NewClient(conn net.Conn, info message.Connect, ctx context.Context, b *Brok
 	go client.loop()
 
 	return client
+}
+
+func (c *Client) publish(pb *message.Publish) error {
+	switch pb.QoS {
+	case message.QoS0:
+		if err := c.session.Write(pb); err != nil {
+			return err
+		}
+	case message.QoS1:
+		if ack, err := c.session.Start(pb.PacketId, message.PUBACK, pb, session.MaxRetries); err != nil {
+			log.Debug("failed to publish session for OoS1: ", err)
+			return err
+		} else if _, ok := ack.(*message.PubAck); !ok {
+			log.Debug("failed to type conversion for OoS1")
+			return errors.New("failed to type conversion for OoS1")
+		}
+		// TODO: Need to save and delete message for QoS1
+	case message.QoS2:
+		if ack, err := c.session.Start(pb.PacketId, message.PUBREC, pb, session.MaxRetries); err != nil {
+			log.Debug("failed to publish session for OoS2: ", err)
+			return err
+		} else if _, ok := ack.(*message.PubRec); !ok {
+			log.Debug("failed to type conversion fto PUBREC or OoS2")
+			return errors.New("failed to type conversion fto PUBREC or OoS2")
+		}
+		// On QoS2, need to send more packet for PUBREL
+		pl := message.NewPubRel(pb.PacketId)
+		if ack, err := c.session.Start(pb.PacketId, message.PUBCOMP, pl, session.MaxRetries); err != nil {
+			log.Debug("failed to pubrel session for OoS2: ", err)
+			return err
+		} else if _, ok := ack.(*message.PubComp); !ok {
+			log.Debug("failed to type conversion to PUBCOMP for OoS2")
+			return errors.New("failed to type conversion to PUBCOMP for OoS2")
+		}
+	}
+	return nil
 }
 
 func (c *Client) Closed() <-chan struct{} {
@@ -141,7 +181,7 @@ func (c *Client) loop() {
 
 		// If client need to send ack message, send it
 		if ack != nil {
-			if err := c.sendMessage(ack); err != nil {
+			if err := c.session.Write(ack); err != nil {
 				log.Debug("failed to send message packet: ", err)
 				return
 			}
@@ -149,26 +189,26 @@ func (c *Client) loop() {
 	}
 }
 
-func (c *Client) sendMessage(m message.Encoder) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	buf, err := m.Encode()
-	if err != nil {
-		log.Debugf("failed to encode ack packet: %s\n", err.Error())
-		return err
-	}
-
-	w := bufio.NewWriter(c.conn)
-	if n, err := w.Write(buf); err != nil {
-		log.Debug("failed to write packet: ", buf)
-		return err
-	} else if n != len(buf) {
-		log.Debug("failed to write enough packet: ", buf)
-		return fmt.Errorf("failed to write enough packet")
-	} else if err := w.Flush(); err != nil {
-		log.Debug("failed to flush packet: ", buf)
-		return err
-	}
-	return nil
-}
+// func (c *Client) sendMessage(m message.Encoder) error {
+// 	c.mu.Lock()
+// 	defer c.mu.Unlock()
+//
+// 	buf, err := m.Encode()
+// 	if err != nil {
+// 		log.Debugf("failed to encode ack packet: %s\n", err.Error())
+// 		return err
+// 	}
+//
+// 	w := bufio.NewWriter(c.conn)
+// 	if n, err := w.Write(buf); err != nil {
+// 		log.Debug("failed to write packet: ", buf)
+// 		return err
+// 	} else if n != len(buf) {
+// 		log.Debug("failed to write enough packet: ", buf)
+// 		return fmt.Errorf("failed to write enough packet")
+// 	} else if err := w.Flush(); err != nil {
+// 		log.Debug("failed to flush packet: ", buf)
+// 		return err
+// 	}
+// 	return nil
+// }
