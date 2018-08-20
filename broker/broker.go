@@ -16,7 +16,7 @@ func formatTopicPath(path string) string {
 	return "/" + strings.Trim(path, "/")
 }
 
-var clients = make(map[string]chan message.Encoder)
+var clients = make(map[string]chan *message.Publish)
 
 type Broker struct {
 	port         int
@@ -57,8 +57,6 @@ func (b *Broker) ListenAndServe(ctx context.Context) error {
 		client := NewClient(s, *info, ctx, b)
 		go b.handleConnection(client)
 	}
-
-	return nil
 }
 
 func (b *Broker) handshake(conn net.Conn, timeout time.Duration) (*message.Connect, error) {
@@ -121,32 +119,29 @@ func (b *Broker) handleConnection(client *Client) {
 	}
 }
 
-func (b *Broker) publish(pb *message.Publish) (message.Encoder, error) {
-	ids := b.subscription.FindAll(pb.TopicName)
-	log.Debugf("targets: %+v\n", ids)
-	if len(ids) > 0 {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		log.Debugf("current clients: %+v\n", clients)
-		for _, id := range ids {
-			if c, ok := clients[id]; ok {
-				log.Debugf("send publish message to: %s\n", id)
-				c <- pb
-			} else {
-				log.Debugf("client %s not found\n", id)
-			}
-		}
+func (b *Broker) publish(pb *message.Publish) {
+
+	clientQoS := b.subscription.GetClientsByTopic(pb.TopicName)
+	if len(clientQoS) == 0 {
+		return
 	}
-	switch pb.QoS {
-	case message.QoS0:
-		return nil, nil
-	case message.QoS1:
-		return message.NewPubAck(pb.PacketId), nil
-	case message.QoS2:
-		return message.NewPubRel(pb.PacketId), nil
-	default:
-		// unreachable line
-		return nil, nil
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for cid, qos := range clientQoS {
+		c, ok := clients[cid]
+		if !ok {
+			continue
+		}
+
+		// Downgrade QoS if we need
+		if pb.QoS > qos {
+			log.Debugf("send publish message to: %s (downgraded %d -> %d)\n", cid, pb.QoS, qos)
+			c <- pb.Downgrade(qos)
+		} else {
+			log.Debugf("send publish message to: %s with qos: %d", cid, pb.QoS)
+			c <- pb
+		}
 	}
 }
 
@@ -154,7 +149,11 @@ func (b *Broker) subscribe(client *Client, ss *message.Subscribe) (message.Encod
 	rcs := []message.ReasonCode{}
 	// TODO: confirm subscription settings e.g. max QoS, ...
 	for _, t := range ss.Subscriptions {
-		rcs = append(rcs, b.subscription.Add(client.Id(), t))
+		rc, err := b.subscription.Subscribe(client.Id(), t)
+		if err != nil {
+			return nil, err
+		}
+		rcs = append(rcs, rc)
 	}
 	return message.NewSubAck(ss.PacketId, rcs...), nil
 }
@@ -171,6 +170,6 @@ func (b *Broker) removeClient(clientId string) {
 	if c, ok := clients[clientId]; ok {
 		close(c)
 		delete(clients, clientId)
-		b.subscription.RemoveAll(clientId)
+		b.subscription.UnsubscribeAll(clientId)
 	}
 }

@@ -50,6 +50,9 @@ func (f *Frame) SetRetain(retain bool) {
 func (f *Frame) Duplicate() {
 	f.DUP = true
 }
+func (f *Frame) GetType() MessageType {
+	return f.Type
+}
 
 func (f *Frame) Encode(payload []byte) []byte {
 	header := []byte{byte(int(f.Type<<4) | encodeBool(f.DUP)<<3 | int(f.QoS)<<1 | encodeBool(f.RETAIN))}

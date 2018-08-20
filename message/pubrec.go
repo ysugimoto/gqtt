@@ -55,9 +55,10 @@ func ParsePubRec(f *Frame, p []byte) (pr *PubRec, err error) {
 	return pr, nil
 }
 
-func NewPubRec(opts ...option) *PubRec {
+func NewPubRec(packetId uint16, opts ...option) *PubRec {
 	return &PubRec{
-		Frame: newFrame(PUBREC, opts...),
+		Frame:    newFrame(PUBREC, opts...),
+		PacketId: packetId,
 	}
 }
 
