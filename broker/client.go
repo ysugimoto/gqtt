@@ -70,6 +70,7 @@ func NewClient(conn net.Conn, info message.Connect, ctx context.Context, b *Brok
 }
 
 func (c *Client) publish(pb *message.Publish) error {
+	log.Debugf("broker publish to client: qos: %d, message: %s\n", pb.QoS, string(pb.Body))
 	switch pb.QoS {
 	case message.QoS0:
 		if err := c.session.Write(pb); err != nil {
@@ -130,7 +131,6 @@ func (c *Client) loop() {
 			log.Debug("client packet receive failed")
 			return
 		}
-		log.Debug("client packet received")
 		if frame == nil {
 			log.Debug("Received empty frame packet")
 			continue
@@ -142,11 +142,14 @@ func (c *Client) loop() {
 				log.Debugf("failed to parse packet to PINGREQ: %s\n", err.Error())
 				return
 			}
-			log.Debug("client PINGREQ received")
+			log.Debugf("client PINGREQ received: %s\n", c.Id())
 
-			// Extend expiration
+			// Extend expiration and respond PINGRESP
 			c.timeout.Reset(c.pingInterval)
-			ack = message.NewPingResp()
+			if err := c.session.Write(message.NewPingResp()); err != nil {
+				log.Debug("failed to send PINGRESP: ", err)
+				return
+			}
 		case message.SUBSCRIBE:
 			ss, err := message.ParseSubscribe(frame, payload)
 			if err != nil {
@@ -154,9 +157,11 @@ func (c *Client) loop() {
 				return
 			}
 			log.Debug("client SUBSCRIBE received")
-			ack, err = c.broker.subscribe(c, ss)
-			if err != nil {
+			if ack, err = c.broker.subscribe(c, ss); err != nil {
 				log.Debugf("failed to add subscribe: %s\n", err.Error())
+				return
+			} else if err := c.session.Write(ack); err != nil {
+				log.Debug("failed to send SUBACK: ", err)
 				return
 			}
 		case message.PUBLISH:
@@ -165,50 +170,76 @@ func (c *Client) loop() {
 				log.Debugf("failed to parse packet to PUBLISH: %s\n", err.Error())
 				return
 			}
-			log.Debugf("Publish message received from: %s, body: %s\n", c.Id(), string(pb.Body))
-			ack, err = c.broker.publish(pb)
+			log.Debugf("Publish message received with QoS: %d from: %s, body: %s\n", pb.QoS, c.Id(), string(pb.Body))
+			switch pb.QoS {
+			case message.QoS0:
+				// QoS0 publishes message immediately
+				c.broker.publish(pb)
+			case message.QoS1:
+				// QoS1 publishes message and respond PUBACK
+				if err := c.session.Write(message.NewPubAck(pb.PacketId)); err != nil {
+					log.Debug("failed to send PUBACK: ", err)
+					return
+				}
+				c.broker.publish(pb)
+			case message.QoS2:
+				// QoS2 stores message and publish after PUBREL packet received
+				c.session.StoreMessage(pb)
+				if err := c.session.Write(message.NewPubRec(pb.PacketId)); err != nil {
+					log.Debug("failed to send PUBREC: ", err)
+					return
+				}
+			}
+		case message.PUBACK:
+			pa, err := message.ParsePubAck(frame, payload)
 			if err != nil {
-				log.Debugf("failed to publish message: %s\n", err.Error())
-				return
-			} else if ack == nil {
-				log.Debug("ack is nil due to Qos0")
+				log.Debug("malformed packet: failed to decode to PUBACK packet: ", err)
+				continue
+			}
+			if err := c.session.Meet(pa.PacketId, message.PUBACK, pa); err != nil {
+				log.Debug("malformed packet: unexpected packet identifier received: ", err)
+				continue
+			}
+		case message.PUBREC:
+			pr, err := message.ParsePubRec(frame, payload)
+			if err != nil {
+				log.Debug("malformed packet: failed to decode to PUBREC packet: ", err)
+				continue
+			}
+			if err := c.session.Meet(pr.PacketId, message.PUBREC, pr); err != nil {
+				log.Debug("malformed packet: unexpected packet identifier received: ", err)
+				continue
+			}
+		case message.PUBREL:
+			pl, err := message.ParsePubRel(frame, payload)
+			if err != nil {
+				log.Debug("malformed packet: failed to decode to PUBREL packet: ", err)
+				continue
+			}
+			pb, ok := c.session.LoadMessage(pl.PacketId)
+			if !ok {
+				log.Debug("Broker recevied PUBREL packet, but message didn't exist")
+				continue
+			}
+			if err := c.session.Write(message.NewPubComp(pl.PacketId)); err != nil {
+				log.Debug("failed to send PUBCOMP pakcet: ", err)
+				continue
+			}
+			c.broker.publish(pb)
+			c.session.DeleteMessage(pl.PacketId)
+		case message.PUBCOMP:
+			pc, err := message.ParsePubComp(frame, payload)
+			if err != nil {
+				log.Debug("malformed packet: failed to decode to PUBCOMP packet: ", err)
+				continue
+			}
+			if err := c.session.Meet(pc.PacketId, message.PUBCOMP, pc); err != nil {
+				log.Debug("malformed packet: unexpected packet identifier received: ", err)
 				continue
 			}
 		default:
 			log.Debugf("not implement packet type: %d\n", frame.Type)
 			continue
 		}
-
-		// If client need to send ack message, send it
-		if ack != nil {
-			if err := c.session.Write(ack); err != nil {
-				log.Debug("failed to send message packet: ", err)
-				return
-			}
-		}
 	}
 }
-
-// func (c *Client) sendMessage(m message.Encoder) error {
-// 	c.mu.Lock()
-// 	defer c.mu.Unlock()
-//
-// 	buf, err := m.Encode()
-// 	if err != nil {
-// 		log.Debugf("failed to encode ack packet: %s\n", err.Error())
-// 		return err
-// 	}
-//
-// 	w := bufio.NewWriter(c.conn)
-// 	if n, err := w.Write(buf); err != nil {
-// 		log.Debug("failed to write packet: ", buf)
-// 		return err
-// 	} else if n != len(buf) {
-// 		log.Debug("failed to write enough packet: ", buf)
-// 		return fmt.Errorf("failed to write enough packet")
-// 	} else if err := w.Flush(); err != nil {
-// 		log.Debug("failed to flush packet: ", buf)
-// 		return err
-// 	}
-// 	return nil
-// }

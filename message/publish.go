@@ -14,6 +14,33 @@ type Publish struct {
 	Property *PublishProperty
 }
 
+// Downgrade QoS.
+// Create new pointer in order to avoid unpexected copy data
+func (p *Publish) Downgrade(qos QoSLevel) *Publish {
+	buf := make([]byte, len(p.Body))
+	copy(buf, p.Body)
+
+	downgraded := &Publish{
+		Frame:     newFrame(PUBLISH, WithQoS(qos)),
+		PacketId:  p.PacketId,
+		TopicName: p.TopicName,
+		Body:      buf,
+	}
+	if p.Property != nil {
+		downgraded.Property = &PublishProperty{
+			PayloadFormatIndicator: p.Property.PayloadFormatIndicator,
+			MessageExpiryInterval:  p.Property.MessageExpiryInterval,
+			ContentType:            p.Property.ContentType,
+			ResponseTopic:          p.Property.ResponseTopic,
+			CorrelationData:        p.Property.CorrelationData,
+			SubscriptionIdentifier: p.Property.SubscriptionIdentifier,
+			TopicAlias:             p.Property.TopicAlias,
+			UserProperty:           p.Property.UserProperty,
+		}
+	}
+	return downgraded
+}
+
 type PublishProperty struct {
 	PayloadFormatIndicator uint8
 	MessageExpiryInterval  uint32

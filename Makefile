@@ -7,8 +7,11 @@ lint:
 	go list ./... | xargs golint
 	go vet ./...
 
-server:
+generate:
+	go generate ./...
+
+server: generate
 	go run cmd/server/main.go
 
-client:
+client: generate
 	go run cmd/client/main.go

@@ -119,31 +119,29 @@ func (b *Broker) handleConnection(client *Client) {
 	}
 }
 
-func (b *Broker) publish(pb *message.Publish) (message.Encoder, error) {
-	clientQoS := b.subscription.GetClientsByTopic(pb.TopicName)
-	if len(clientQoS) > 0 {
-		b.mu.Lock()
-		defer b.mu.Unlock()
+func (b *Broker) publish(pb *message.Publish) {
 
-		for cid, _ := range clientQoS {
-			if c, ok := clients[cid]; ok {
-				log.Debugf("send publish message to: %s\n", cid)
-				c <- pb
-			} else {
-				log.Debugf("client %s not found\n", cid)
-			}
-		}
+	clientQoS := b.subscription.GetClientsByTopic(pb.TopicName)
+	if len(clientQoS) == 0 {
+		return
 	}
-	switch pb.QoS {
-	case message.QoS0:
-		return nil, nil
-	case message.QoS1:
-		return message.NewPubAck(pb.PacketId), nil
-	case message.QoS2:
-		return message.NewPubRel(pb.PacketId), nil
-	default:
-		// unreachable line
-		return nil, nil
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for cid, qos := range clientQoS {
+		c, ok := clients[cid]
+		if !ok {
+			continue
+		}
+
+		// Downgrade QoS if we need
+		if pb.QoS > qos {
+			log.Debugf("send publish message to: %s (downgraded %d -> %d)\n", cid, pb.QoS, qos)
+			c <- pb.Downgrade(qos)
+		} else {
+			log.Debugf("send publish message to: %s with qos: %d", cid, pb.QoS)
+			c <- pb
+		}
 	}
 }
 

@@ -4,8 +4,8 @@
 [[projects]]
   name = "github.com/davecgh/go-spew"
   packages = ["spew"]
-  revision = "346938d642f2ec3594ed81d874461961cd0faa76"
-  version = "v1.1.0"
+  revision = "8991bc29aa16c548c550c7ff78260e27b9ab7c73"
+  version = "v1.1.1"
 
 [[projects]]
   name = "github.com/pmezard/go-difflib"
@@ -25,9 +25,15 @@
   revision = "f35b8ab0b5a2cef36673838d662e249dd9c94686"
   version = "v1.2.2"
 
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/tools"
+  packages = ["cmd/stringer"]
+  revision = "7d1dc997617fb662918b6ea95efc19faa87e1cf8"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "1c0400d0163e518cb1adb38d4bd7ecd5912ceae821304843545b3b8a7ac8e3a7"
+  inputs-digest = "c4471b197cda37d2ad8f1bdb7a5d1ab49504ad28105421e176856a20dd503fcc"
   solver-name = "gps-cdcl"
   solver-version = 1

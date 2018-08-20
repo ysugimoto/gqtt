@@ -55,9 +55,10 @@ func ParsePubComp(f *Frame, p []byte) (pc *PubComp, err error) {
 	return pc, nil
 }
 
-func NewPubComp(opts ...option) *PubComp {
+func NewPubComp(packetId uint16, opts ...option) *PubComp {
 	return &PubComp{
-		Frame: newFrame(PUBCOMP, opts...),
+		Frame:    newFrame(PUBCOMP, opts...),
+		PacketId: packetId,
 	}
 }
 

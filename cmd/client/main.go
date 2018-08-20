@@ -24,7 +24,7 @@ func main() {
 	}
 	log.Println("client connected")
 
-	if err := client.Subscribe("gqtt/example", message.QoS0); err != nil {
+	if err := client.Subscribe("gqtt/example", message.QoS2); err != nil {
 		log.Fatal(err)
 	}
 	log.Println("subscribed")
@@ -43,7 +43,8 @@ func main() {
 			log.Printf("published message received: %s\n", string(msg.Body))
 		case <-ticker.C:
 			log.Printf("message publish")
-			if err := client.Publish("gqtt/example", message.QoS0, []byte("Hello, MQTT5! from "+sig)); err != nil {
+			ticker.Stop()
+			if err := client.Publish("gqtt/example", message.QoS2, []byte("Hello, MQTT5! from "+sig)); err != nil {
 				return
 			}
 		}

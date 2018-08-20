@@ -23,7 +23,6 @@ type Client struct {
 	url          string
 	conn         net.Conn
 	ctx          context.Context
-	terminate    context.CancelFunc
 	session      *session.Session
 	pingInterval *time.Ticker
 
@@ -54,7 +53,7 @@ func (c *Client) ConnectWithOption(ctx context.Context, opt *ClientOption) error
 
 	log.Debug("connection established!")
 
-	c.ctx, c.terminate = context.WithCancel(ctx)
+	c.ctx = ctx
 	c.Closed = make(chan struct{})
 	c.Message = make(chan *message.Publish)
 	c.session = session.New(c.conn, c.ctx)
@@ -68,7 +67,6 @@ func (c *Client) ConnectWithOption(ctx context.Context, opt *ClientOption) error
 				c.Disconnect()
 				return
 			case <-c.pingInterval.C:
-				log.Debug("ping interval is coming. send ping to server")
 				c.session.Write(message.NewPingReq())
 			}
 		}
@@ -95,38 +93,12 @@ func (c *Client) Disconnect() {
 	})
 }
 
-// func (c *Client) sendMessage(m message.Encoder) error {
-// 	c.mu.Lock()
-// 	defer func() {
-// 		// This is a trick for sending mutex blocked message queue properly.
-// 		// Wait a tiny microseconds before unlock mutex, it makes socket accepts to write next packet again.
-// 		time.Sleep(10 * time.Microsecond)
-// 		c.mu.Unlock()
-// 	}()
-//
-// 	buf, err := m.Encode()
-// 	if err != nil {
-// 		log.Debug("failed to encode message ", err)
-// 		return err
-// 	}
-//
-// 	if n, err := c.conn.Write(buf); err != nil {
-// 		log.Debug("failed to write packet: ", buf)
-// 		return err
-// 	} else if n != len(buf) {
-// 		log.Debug("could not enough patck")
-// 		return errors.New("could not write enough packet")
-// 	}
-// 	return nil
-// }
-
 func (c *Client) mainLoop() {
-	defer c.terminate()
+	defer c.Disconnect()
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Debugf("terminated")
-			c.Disconnect()
 			return
 		default:
 			frame, payload, err := message.ReceiveFrame(c.conn)
@@ -142,12 +114,11 @@ func (c *Client) mainLoop() {
 			}
 			switch frame.Type {
 			case message.PINGRESP:
-				pr, err := message.ParsePingResp(frame, payload)
-				if err != nil {
+				if _, err := message.ParsePingResp(frame, payload); err != nil {
 					log.Debug("malformed packet: failed to decode to PINGREQ packet: ", err)
 					continue
 				}
-				log.Debugf("PINGRESP received: %+v\n", pr)
+				log.Debug("PINGRESP received from broker")
 			case message.SUBACK:
 				ack, err := message.ParseSubAck(frame, payload)
 				if err != nil {
@@ -169,13 +140,14 @@ func (c *Client) mainLoop() {
 					continue
 				}
 			case message.PUBLISH:
-				log.Debug("PUBLISH message received")
 				pb, err := message.ParsePublish(frame, payload)
 				if err != nil {
 					log.Debug("malformed packet: failed to decode to PUBLISH packet: ", err)
 					continue
+				} else if err := c.receivePublish(pb); err != nil {
+					log.Debug("client failed to process publish pakcet: ", err)
+					continue
 				}
-				c.Message <- pb
 			case message.PUBREC:
 				ack, err := message.ParsePubRec(frame, payload)
 				if err != nil {
@@ -186,6 +158,24 @@ func (c *Client) mainLoop() {
 					log.Debug("malformed packet: unexpected packet identifier received: ", err)
 					continue
 				}
+			case message.PUBREL:
+				pl, err := message.ParsePubRel(frame, payload)
+				if err != nil {
+					log.Debug("malformed packet: failed to decode to PUBREL packet: ", err)
+					continue
+				}
+				pb, ok := c.session.LoadMessage(pl.PacketId)
+				if !ok {
+					log.Debug("Client received PUBREL packet, but message wan't saved")
+					continue
+				}
+				pc := message.NewPubComp(pl.PacketId)
+				if err := c.session.Write(pc); err != nil {
+					log.Debug("failed to send PUBCOMP packet to publisher")
+					continue
+				}
+				c.Message <- pb
+				c.session.DeleteMessage(pl.PacketId)
 			case message.PUBCOMP:
 				ack, err := message.ParsePubComp(frame, payload)
 				if err != nil {
@@ -208,28 +198,6 @@ func (c *Client) makePacketId() uint16 {
 	c.packetId++
 	return c.packetId
 }
-
-// func (c *Client) runSession(packetId uint16, mt message.MessageType, msg message.Encoder) (interface{}, error) {
-// 	recv := make(chan interface{})
-// 	c.sessions[packetId] = session{
-// 		Type:    mt,
-// 		Channel: recv,
-// 	}
-// 	ctx, timeout := context.WithTimeout(c.ctx, 10*time.Second)
-// 	defer timeout()
-//
-// 	// Send message
-// 	if err := c.sendMessage(msg); err != nil {
-// 		return nil, err
-// 	}
-// 	// wait or timeout
-// 	select {
-// 	case <-ctx.Done():
-// 		return nil, ctx.Err()
-// 	case ack := <-recv:
-// 		return ack, nil
-// 	}
-// }
 
 func (c *Client) Subscribe(topic string, qos message.QoSLevel) error {
 	packetId := c.makePacketId()
@@ -274,7 +242,6 @@ func (c *Client) Publish(topic string, qos message.QoSLevel, body []byte) error 
 			log.Debug("failed to type conversion for OoS1")
 			return errors.New("failed to type conversion for OoS1")
 		}
-		// TODO: Need to save and delete message for QoS1
 	case message.QoS2:
 		pb.PacketId = c.makePacketId()
 		if ack, err := c.session.Start(pb.PacketId, message.PUBREC, pb, session.MaxRetries); err != nil {
@@ -284,6 +251,7 @@ func (c *Client) Publish(topic string, qos message.QoSLevel, body []byte) error 
 			log.Debug("failed to type conversion fto PUBREC or OoS2")
 			return errors.New("failed to type conversion fto PUBREC or OoS2")
 		}
+		log.Debug("PUBREC received. Send PUBREL")
 		// On QoS2, need to send more packet for PUBREL
 		pl := message.NewPubRel(pb.PacketId)
 		if ack, err := c.session.Start(pb.PacketId, message.PUBCOMP, pl, session.MaxRetries); err != nil {
@@ -293,6 +261,30 @@ func (c *Client) Publish(topic string, qos message.QoSLevel, body []byte) error 
 			log.Debug("failed to type conversion to PUBCOMP for OoS2")
 			return errors.New("failed to type conversion to PUBCOMP for OoS2")
 		}
+	}
+	return nil
+}
+
+func (c *Client) receivePublish(pb *message.Publish) error {
+	log.Debugf("PUBLISH message received with QoS: %d\n", pb.QoS)
+	switch pb.QoS {
+	case message.QoS0:
+		c.Message <- pb
+	case message.QoS1:
+		log.Debug("Send PUBACK to the publisher")
+		if err := c.session.Write(message.NewPubAck(pb.PacketId)); err != nil {
+			log.Debug("failed to send PUBACK packet")
+			return err
+		}
+		c.Message <- pb
+	case message.QoS2:
+		c.session.StoreMessage(pb)
+		if err := c.session.Write(message.NewPubRec(pb.PacketId)); err != nil {
+			log.Debug("failed to send PUBREC packet")
+			return err
+		}
+	default:
+		return errors.New("unexpected QoS")
 	}
 	return nil
 }
