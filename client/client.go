@@ -11,12 +11,8 @@ import (
 	"time"
 )
 
-type ClientOption = message.ConnectProperty
+type ConnectionOption = message.ConnectProperty
 type ServerInfo = message.ConnAckProperty
-
-func NewClientOption() *ClientOption {
-	return &ClientOption{}
-}
 
 type Client struct {
 	packetId     uint16
@@ -40,14 +36,10 @@ func NewClient(u string) *Client {
 	}
 }
 
-func (c *Client) Connect(ctx context.Context) error {
-	return c.ConnectWithOption(ctx, nil)
-}
-
-func (c *Client) ConnectWithOption(ctx context.Context, opt *ClientOption) error {
+func (c *Client) Connect(ctx context.Context, options ...ClientOption) error {
 	var err error
 
-	if c.conn, c.ServerInfo, err = connect(c.url, opt); err != nil {
+	if c.conn, c.ServerInfo, err = connect(c.url, options); err != nil {
 		return err
 	}
 

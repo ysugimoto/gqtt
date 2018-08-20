@@ -19,7 +19,8 @@ func main() {
 	defer client.Disconnect()
 
 	ctx := context.Background()
-	if err := client.Connect(ctx); err != nil {
+	auth := gqtt.WithBasicAuth("admin", "admin")
+	if err := client.Connect(ctx, auth); err != nil {
 		log.Fatal(err)
 	}
 	log.Println("client connected")

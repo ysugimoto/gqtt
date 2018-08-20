@@ -7,6 +7,7 @@ import (
 )
 
 type Topic = message.SubscribeTopic
+type Option = client.ClientOption
 
 func NewBroker(port int) *broker.Broker {
 	return broker.NewBroker(port)
@@ -14,4 +15,12 @@ func NewBroker(port int) *broker.Broker {
 
 func NewClient(url string) *client.Client {
 	return client.NewClient(url)
+}
+
+func WithBasicAuth(user, password string) Option {
+	return client.WithBasicAuth(user, password)
+}
+
+func WithLoginAuth(user, password string) Option {
+	return client.WithLoginAuth(user, password)
 }

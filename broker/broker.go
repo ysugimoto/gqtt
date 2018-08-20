@@ -50,7 +50,7 @@ func (b *Broker) ListenAndServe(ctx context.Context) error {
 
 		info, err := b.handshake(s, 10*time.Second)
 		if err != nil {
-			log.Debug("Failed to MQTT handshake: %s", err.Error())
+			log.Debug("Failed to MQTT handshake: ", err.Error())
 			s.Close()
 			continue
 		}
@@ -96,9 +96,29 @@ func (b *Broker) handshake(conn net.Conn, timeout time.Duration) (*message.Conne
 		log.Debug("frame expects connect package: ", err)
 		return nil, err
 	}
+	if err := b.authConnect(conn, cn.Property); err != nil {
+		reason = message.NotAuthorized
+		log.Debug("connection not authorized")
+		return nil, err
+	}
 	reason = message.Success
 	log.Debugf("CONNECT accepted: %+v\n", cn)
 	return cn, nil
+}
+
+func (b *Broker) authConnect(conn net.Conn, cp *message.ConnectProperty) error {
+	// TODO: control to need to authneication on broker from setting or someway
+	if cp == nil {
+		return nil
+	}
+	switch cp.AuthenticationMethod {
+	case basicAuthentication:
+		return doBasicAuth(conn, cp)
+	case loginAuthentication:
+		return doLoginAuth(conn, cp)
+	default:
+		return fmt.Errorf("%s does not support or unrecognized", cp.AuthenticationMethod)
+	}
 }
 
 func (b *Broker) handleConnection(client *Client) {
@@ -120,7 +140,6 @@ func (b *Broker) handleConnection(client *Client) {
 }
 
 func (b *Broker) publish(pb *message.Publish) {
-
 	clientQoS := b.subscription.GetClientsByTopic(pb.TopicName)
 	if len(clientQoS) == 0 {
 		return

@@ -165,3 +165,20 @@ func TestUsingWillPropertyOnHeader(t *testing.T) {
 	assert.Contains(t, u, "will")
 	assert.Equal(t, u["will"], "be")
 }
+
+func TestForAuth(t *testing.T) {
+	c := message.NewConnect()
+	c.ClientId = "1111"
+	c.Property = &message.ConnectProperty{
+		AuthenticationMethod: "basic",
+		AuthenticationData:   []byte("foo:bar"),
+	}
+	buf, err := c.Encode()
+	assert.NoError(t, err)
+
+	f, p, err := message.ReceiveFrame(bytes.NewReader(buf))
+	assert.NoError(t, err)
+	_, err = message.ParseConnect(f, p)
+	assert.NoError(t, err)
+
+}

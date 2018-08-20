@@ -9,7 +9,7 @@ import (
 )
 
 func TestPubRecMessageFailedIfPacketIdIsZero(t *testing.T) {
-	rec := message.NewPubRec()
+	rec := message.NewPubRec(0)
 	buf, err := rec.Encode()
 	assert.Error(t, err)
 	assert.Nil(t, buf)
@@ -17,8 +17,7 @@ func TestPubRecMessageFailedIfPacketIdIsZero(t *testing.T) {
 
 func TestPubRecEncodeDecodeOK(t *testing.T) {
 	t.Run("Omit return code", func(t *testing.T) {
-		rec := message.NewPubRec()
-		rec.PacketId = 60000
+		rec := message.NewPubRec(60000)
 		buf, err := rec.Encode()
 		assert.NoError(t, err)
 
@@ -37,8 +36,7 @@ func TestPubRecEncodeDecodeOK(t *testing.T) {
 		assert.Nil(t, rec.Property)
 	})
 	t.Run("Omit variable property", func(t *testing.T) {
-		rec := message.NewPubRec()
-		rec.PacketId = 60000
+		rec := message.NewPubRec(60000)
 		rec.ReasonCode = message.NoSubscriptionExisted
 		buf, err := rec.Encode()
 		assert.NoError(t, err)
@@ -58,8 +56,7 @@ func TestPubRecEncodeDecodeOK(t *testing.T) {
 		assert.Nil(t, rec.Property)
 	})
 	t.Run("Full case", func(t *testing.T) {
-		rec := message.NewPubRec()
-		rec.PacketId = 60000
+		rec := message.NewPubRec(60000)
 		rec.ReasonCode = message.Success
 		rec.Property = &message.PubRecProperty{
 			ReasonString: "well done",

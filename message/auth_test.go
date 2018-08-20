@@ -10,7 +10,7 @@ import (
 
 func TestAuthMessageEncodeDecode(t *testing.T) {
 	t.Run("Omit property should be success", func(t *testing.T) {
-		a := message.NewAuth()
+		a := message.NewAuth(message.Success)
 		buf, err := a.Encode()
 		assert.NoError(t, err)
 
@@ -28,7 +28,7 @@ func TestAuthMessageEncodeDecode(t *testing.T) {
 	})
 
 	t.Run("Full case", func(t *testing.T) {
-		a := message.NewAuth()
+		a := message.NewAuth(message.ContinueAuthentication)
 		a.Property = &message.AuthProperty{
 			AuthenticationMethod: "BASIC",
 			AuthenticationData:   []byte("foo:Bar"),
@@ -49,7 +49,7 @@ func TestAuthMessageEncodeDecode(t *testing.T) {
 
 		a, err = message.ParseAuth(f, p)
 		assert.NoError(t, err)
-		assert.Equal(t, message.Success, a.ReasonCode)
+		assert.Equal(t, message.ContinueAuthentication, a.ReasonCode)
 		assert.NotNil(t, a.Property)
 		assert.Equal(t, "BASIC", a.Property.AuthenticationMethod)
 		assert.Equal(t, []byte("foo:Bar"), a.Property.AuthenticationData)

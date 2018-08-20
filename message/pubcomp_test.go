@@ -9,7 +9,7 @@ import (
 )
 
 func TestPubCompMessageFailedIfPacketIdIsZero(t *testing.T) {
-	comp := message.NewPubComp()
+	comp := message.NewPubComp(0)
 	buf, err := comp.Encode()
 	assert.Error(t, err)
 	assert.Nil(t, buf)
@@ -17,8 +17,7 @@ func TestPubCompMessageFailedIfPacketIdIsZero(t *testing.T) {
 
 func TestPubCompEncodeDecodeOK(t *testing.T) {
 	t.Run("Omit return code", func(t *testing.T) {
-		comp := message.NewPubComp()
-		comp.PacketId = 60000
+		comp := message.NewPubComp(60000)
 		buf, err := comp.Encode()
 		assert.NoError(t, err)
 
@@ -37,8 +36,7 @@ func TestPubCompEncodeDecodeOK(t *testing.T) {
 		assert.Nil(t, comp.Property)
 	})
 	t.Run("Omit variable property", func(t *testing.T) {
-		comp := message.NewPubComp()
-		comp.PacketId = 60000
+		comp := message.NewPubComp(60000)
 		comp.ReasonCode = message.NoSubscriptionExisted
 		buf, err := comp.Encode()
 		assert.NoError(t, err)
@@ -58,8 +56,7 @@ func TestPubCompEncodeDecodeOK(t *testing.T) {
 		assert.Nil(t, comp.Property)
 	})
 	t.Run("Full case", func(t *testing.T) {
-		comp := message.NewPubComp()
-		comp.PacketId = 60000
+		comp := message.NewPubComp(60000)
 		comp.ReasonCode = message.Success
 		comp.Property = &message.PubCompProperty{
 			ReasonString: "well done",
