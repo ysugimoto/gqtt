@@ -42,6 +42,9 @@ type ConnectProperty struct {
 	TopicAliasMaximum          uint16
 	UserProperty               map[string]string
 	MaximumPacketSize          uint32
+
+	// Extra field for application: stack auth challenge data
+	ChallengeData interface{}
 }
 
 func (c *ConnectProperty) ToProp() *Property {
@@ -76,6 +79,17 @@ func (w *WillProperty) ToProp() *Property {
 		ResponseTopic:          w.ResponseTopic,
 		CorrelationData:        w.CorrelationData,
 		WillDelayInterval:      w.WillDelayInterval,
+		UserProperty:           w.UserProperty,
+	}
+}
+
+func (w *WillProperty) ToPublish() *PublishProperty {
+	return &PublishProperty{
+		PayloadFormatIndicator: w.PayloadFormatIndicator,
+		MessageExpiryInterval:  w.MessageExpiryInterval,
+		ContentType:            w.ContentType,
+		ResponseTopic:          w.ResponseTopic,
+		CorrelationData:        w.CorrelationData,
 		UserProperty:           w.UserProperty,
 	}
 }

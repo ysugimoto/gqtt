@@ -67,11 +67,9 @@ func (s *Session) Write(msg message.Encoder) error {
 		log.Debug("could not enough patck")
 		return s.recoverError(errors.New("could not write enough packet"))
 	}
-	return nil
-}
 
-func (s *Session) Read(p []byte) (n int, err error) {
-	return s.conn.Read(p)
+	log.Debug("-->> ", msg.GetType())
+	return nil
 }
 
 func (s *Session) Start(ident uint16, meet message.MessageType, msg message.Encoder, retry int) (interface{}, error) {
@@ -79,7 +77,12 @@ func (s *Session) Start(ident uint16, meet message.MessageType, msg message.Enco
 		messageType: meet,
 		channel:     make(chan interface{}),
 	}
+	// sync.Map is safety for threading, but not relaiable on too fast store/delete.
+	// So we guard again by mutex
 	s.stack.Store(ident, data)
+	// time.Sleep( * time.Second)
+
+	log.Debug("session stored for ident: ", ident)
 	ctx, timeout := context.WithTimeout(s.ctx, 10*time.Second)
 	defer func() {
 		timeout()
@@ -88,7 +91,7 @@ func (s *Session) Start(ident uint16, meet message.MessageType, msg message.Enco
 	s.isRunning = true
 
 	// Send message
-	if err := s.Write(msg); err != nil {
+	if err := message.WriteFrame(s.conn, msg); err != nil {
 		return nil, err
 	}
 	// wait or timeout
@@ -98,7 +101,7 @@ func (s *Session) Start(ident uint16, meet message.MessageType, msg message.Enco
 		if retry < 0 {
 			return nil, ctx.Err()
 		}
-		log.Debugf("Session retry for id: %d\n", ident)
+		log.Debugf("Session retry for type: %s\n", meet)
 		time.Sleep(3 * time.Second)
 		msg.Duplicate()
 		return s.Start(ident, meet, msg, retry)
@@ -113,6 +116,7 @@ func (s *Session) Meet(ident uint16, meet message.MessageType, msg interface{}) 
 		return fmt.Errorf("session not found for ident: %d", ident)
 	}
 	defer s.stack.Delete(ident)
+	log.Debugf("stack deleted for ident: %d", ident)
 	data := v.(sessionData)
 	if data.messageType != meet {
 		return fmt.Errorf("session found, but unexpected message type: %s", data.messageType.String())
@@ -123,18 +127,22 @@ func (s *Session) Meet(ident uint16, meet message.MessageType, msg interface{}) 
 
 func (s *Session) StoreMessage(pb *message.Publish) {
 	s.storedMessage.Store(pb.PacketId, pb)
+	log.Debug("[session] message stored")
 }
 
 func (s *Session) LoadMessage(packetId uint16) (*message.Publish, bool) {
 	v, ok := s.storedMessage.Load(packetId)
 	if !ok {
+		log.Debug("[session] message load failed")
 		return nil, false
 	}
+	log.Debug("[session] message load success")
 	pb, ok := v.(*message.Publish)
 	return pb, ok
 }
 
 func (s *Session) DeleteMessage(packetId uint16) {
+	log.Debug("[session] message delete")
 	if _, ok := s.storedMessage.Load(packetId); ok {
 		s.storedMessage.Delete(packetId)
 	}

@@ -1,6 +1,7 @@
 package log
 
 import (
+	"github.com/k0kubun/pp"
 	. "log"
 	"os"
 )
@@ -20,5 +21,11 @@ func Debug(v ...interface{}) {
 func Debugf(format string, v ...interface{}) {
 	if isDebug {
 		Printf(format, v...)
+	}
+}
+
+func Dump(v interface{}) {
+	if isDebug {
+		pp.Print(v)
 	}
 }

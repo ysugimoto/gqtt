@@ -5,33 +5,23 @@ import (
 	"github.com/ysugimoto/gqtt"
 	"github.com/ysugimoto/gqtt/message"
 	"log"
-	"os"
-	"time"
 )
 
 func main() {
-	var sig string = "default"
-	if len(os.Args) > 1 {
-		sig = os.Args[1]
-	}
-
 	client := gqtt.NewClient("mqtt://localhost:9999")
 	defer client.Disconnect()
 
 	ctx := context.Background()
 	auth := gqtt.WithLoginAuth("admin", "admin")
-	will := gqtt.WithWill(message.QoS0, false, "some/will", "send will", nil)
-	if err := client.Connect(ctx, auth, will); err != nil {
+	if err := client.Connect(ctx, auth); err != nil {
 		log.Fatal(err)
 	}
 	log.Println("client connected")
 
-	if err := client.Subscribe("gqtt/example", message.QoS2); err != nil {
+	if err := client.Subscribe("some/will", message.QoS2); err != nil {
 		log.Fatal(err)
 	}
 	log.Println("subscribed")
-
-	ticker := time.NewTicker(3 * time.Second)
 
 	for {
 		select {
@@ -43,12 +33,6 @@ func main() {
 			return
 		case msg := <-client.Message:
 			log.Printf("published message received: %s\n", string(msg.Body))
-		case <-ticker.C:
-			log.Printf("message publish")
-			ticker.Stop()
-			if err := client.Publish("gqtt/example", message.QoS2, []byte("Hello, MQTT5! from "+sig)); err != nil {
-				return
-			}
 		}
 	}
 }

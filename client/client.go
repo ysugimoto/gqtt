@@ -11,12 +11,8 @@ import (
 	"time"
 )
 
-type ClientOption = message.ConnectProperty
+type ConnectionOption = message.ConnectProperty
 type ServerInfo = message.ConnAckProperty
-
-func NewClientOption() *ClientOption {
-	return &ClientOption{}
-}
 
 type Client struct {
 	packetId     uint16
@@ -40,14 +36,10 @@ func NewClient(u string) *Client {
 	}
 }
 
-func (c *Client) Connect(ctx context.Context) error {
-	return c.ConnectWithOption(ctx, nil)
-}
-
-func (c *Client) ConnectWithOption(ctx context.Context, opt *ClientOption) error {
+func (c *Client) Connect(ctx context.Context, options ...ClientOption) error {
 	var err error
 
-	if c.conn, c.ServerInfo, err = connect(c.url, opt); err != nil {
+	if c.conn, c.ServerInfo, err = connect(c.url, options); err != nil {
 		return err
 	}
 
@@ -67,7 +59,7 @@ func (c *Client) ConnectWithOption(ctx context.Context, opt *ClientOption) error
 				c.Disconnect()
 				return
 			case <-c.pingInterval.C:
-				c.session.Write(message.NewPingReq())
+				message.WriteFrame(c.conn, message.NewPingReq())
 			}
 		}
 	}()
@@ -82,7 +74,7 @@ func (c *Client) Disconnect() {
 		c.pingInterval.Stop()
 
 		dc := message.NewDisconnect(message.NormalDisconnection)
-		if err := c.session.Write(dc); err != nil {
+		if err := message.WriteFrame(c.conn, dc); err != nil {
 			log.Debug("failed to send DISCONNECT message: ", err)
 		}
 		log.Debug("Closing connection")
@@ -118,7 +110,6 @@ func (c *Client) mainLoop() {
 					log.Debug("malformed packet: failed to decode to PINGREQ packet: ", err)
 					continue
 				}
-				log.Debug("PINGRESP received from broker")
 			case message.SUBACK:
 				ack, err := message.ParseSubAck(frame, payload)
 				if err != nil {
@@ -164,16 +155,19 @@ func (c *Client) mainLoop() {
 					log.Debug("malformed packet: failed to decode to PUBREL packet: ", err)
 					continue
 				}
+				log.Debug("PUBREL package received")
 				pb, ok := c.session.LoadMessage(pl.PacketId)
 				if !ok {
 					log.Debug("Client received PUBREL packet, but message wan't saved")
 					continue
 				}
+				log.Debug("Message found")
 				pc := message.NewPubComp(pl.PacketId)
-				if err := c.session.Write(pc); err != nil {
+				if err := message.WriteFrame(c.conn, pc); err != nil {
 					log.Debug("failed to send PUBCOMP packet to publisher")
 					continue
 				}
+				log.Debug("Send PUBCOMP")
 				c.Message <- pb
 				c.session.DeleteMessage(pl.PacketId)
 			case message.PUBCOMP:
@@ -229,7 +223,7 @@ func (c *Client) Publish(topic string, qos message.QoSLevel, body []byte) error 
 	switch qos {
 	case message.QoS0:
 		// If OoS is zero, we don't need packet identifier and any acknowledgment
-		if err := c.session.Write(pb); err != nil {
+		if err := message.WriteFrame(c.conn, pb); err != nil {
 			log.Debug("failed to send publish with QoS0 ", err)
 			return err
 		}
@@ -252,6 +246,7 @@ func (c *Client) Publish(topic string, qos message.QoSLevel, body []byte) error 
 			return errors.New("failed to type conversion fto PUBREC or OoS2")
 		}
 		log.Debug("PUBREC received. Send PUBREL")
+		time.Sleep(10 * time.Millisecond)
 		// On QoS2, need to send more packet for PUBREL
 		pl := message.NewPubRel(pb.PacketId)
 		if ack, err := c.session.Start(pb.PacketId, message.PUBCOMP, pl, session.MaxRetries); err != nil {
@@ -272,17 +267,18 @@ func (c *Client) receivePublish(pb *message.Publish) error {
 		c.Message <- pb
 	case message.QoS1:
 		log.Debug("Send PUBACK to the publisher")
-		if err := c.session.Write(message.NewPubAck(pb.PacketId)); err != nil {
+		if err := message.WriteFrame(c.conn, message.NewPubAck(pb.PacketId)); err != nil {
 			log.Debug("failed to send PUBACK packet")
 			return err
 		}
 		c.Message <- pb
 	case message.QoS2:
 		c.session.StoreMessage(pb)
-		if err := c.session.Write(message.NewPubRec(pb.PacketId)); err != nil {
+		if err := message.WriteFrame(c.conn, message.NewPubRec(pb.PacketId)); err != nil {
 			log.Debug("failed to send PUBREC packet")
 			return err
 		}
+		log.Debugf("Message saved for packetID: %d\n", pb.PacketId)
 	default:
 		return errors.New("unexpected QoS")
 	}

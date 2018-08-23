@@ -57,10 +57,10 @@ func ParseAuth(f *Frame, p []byte) (a *Auth, err error) {
 	return a, nil
 }
 
-func NewAuth(opts ...option) *Auth {
+func NewAuth(reason ReasonCode, opts ...option) *Auth {
 	return &Auth{
 		Frame:      newFrame(AUTH, opts...),
-		ReasonCode: Success,
+		ReasonCode: reason,
 	}
 }
 
