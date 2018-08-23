@@ -13,8 +13,10 @@ import (
 	"github.com/ysugimoto/gqtt/message"
 )
 
-func makeConnectionProperty(opts []ClientOption) *message.ConnectProperty {
-	log.Debugf("option data %+v", opts)
+func makeConnectionMessage(opts []ClientOption) *message.Connect {
+	connect := message.NewConnect()
+	connect.ClientId = uuid.NewV4().String()
+
 	var exists bool
 	p := &message.ConnectProperty{}
 	for _, o := range opts {
@@ -32,12 +34,22 @@ func makeConnectionProperty(opts []ClientOption) *message.ConnectProperty {
 			p.AuthenticationData = []byte(v["user"])
 			p.ChallengeData = v
 			exists = true
+		case nameWill:
+			v := o.value.(map[string]interface{})
+			connect.FlagWill = true
+			connect.WillQoS = v["qos"].(message.QoSLevel)
+			connect.WillRetain = v["retain"].(bool)
+			connect.WillTopic = v["topic"].(string)
+			connect.WillPayload = v["payload"].(string)
+			if v["property"] != nil {
+				connect.WillProperty = v["property"].(*message.WillProperty)
+			}
 		}
 	}
-	if !exists {
-		return nil
+	if exists {
+		connect.Property = p
 	}
-	return p
+	return connect
 }
 
 func connect(u string, opts []ClientOption) (net.Conn, *ServerInfo, error) {
@@ -78,22 +90,9 @@ func connect(u string, opts []ClientOption) (net.Conn, *ServerInfo, error) {
 }
 
 func handshake(conn net.Conn, opts []ClientOption) (*ServerInfo, error) {
-	// if opt == nil {
-	// 	opt = NewClientOption()
-	// }
-	connect := message.NewConnect()
-	connect.ClientId = uuid.NewV4().String()
-	if len(opts) > 0 {
-		connect.Property = makeConnectionProperty(opts)
-	}
-
-	packet, err := connect.Encode()
-	if err != nil {
-		log.Debug("failed to encode CONNECT packet: ", err)
-		return nil, err
-	}
-	if _, err := conn.Write(packet); err != nil {
-		log.Debug("failed to write packet: ", err)
+	c := makeConnectionMessage(opts)
+	if err := message.WriteFrame(conn, c); err != nil {
+		log.Debug("failed to write CONNECT packet: ", err)
 		return nil, err
 	}
 
@@ -118,7 +117,7 @@ func handshake(conn net.Conn, opts []ClientOption) (*ServerInfo, error) {
 				log.Debug("CONNACK doesn't reply success code: ", ack.ReasonCode)
 				return nil, errors.New("CONNACK doesn't reply success code")
 			} else {
-				log.Debug("CONNACK received, clientId is ", connect.ClientId)
+				log.Debug("CONNACK received, clientId is ", c.ClientId)
 				return ack.Property, nil
 			}
 		case message.AUTH:
@@ -129,10 +128,12 @@ func handshake(conn net.Conn, opts []ClientOption) (*ServerInfo, error) {
 			}
 			switch auth.ReasonCode {
 			case message.Success:
+				log.Debug("Authentication success")
 				// Authenticate succeed on broker
+				time.Sleep(10 * time.Millisecond)
 				continue
 			case message.ContinueAuthentication:
-				if err := authenticate(conn, connect.Property); err != nil {
+				if err := authenticate(conn, c.Property); err != nil {
 					return nil, err
 				}
 			}
@@ -151,13 +152,8 @@ func authenticate(conn net.Conn, prop *message.ConnectProperty) error {
 			AuthenticationMethod: "login",
 			AuthenticationData:   []byte(cd["pass"]),
 		}
-		packet, err := auth.Encode()
-		if err != nil {
-			log.Debug("failed to encode AUTH packet: ", err)
-			return err
-		}
-		if _, err := conn.Write(packet); err != nil {
-			log.Debug("failed to write packet: ", err)
+		if err := message.WriteFrame(conn, auth); err != nil {
+			log.Debug("failed to send AUTH packet: ", err)
 			return err
 		}
 	default:

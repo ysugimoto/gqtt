@@ -15,3 +15,6 @@ server: generate
 
 client: generate
 	go run cmd/client/main.go
+
+will-client: generate
+	go run cmd/client/will.go

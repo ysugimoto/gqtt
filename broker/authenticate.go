@@ -16,21 +16,21 @@ const (
 	loginAuthentication = "login"
 )
 
-func write(conn net.Conn, m message.Encoder) error {
-	buf, err := m.Encode()
-	if err != nil {
-		log.Debug("failed to encode auth packet ", err)
-		return err
-	}
-	if n, err := conn.Write(buf); err != nil {
-		log.Debug("failed to write auth packet ", err)
-		return err
-	} else if len(buf) != n {
-		log.Debug("failed to write enough packet")
-		return fmt.Errorf("failed to write enough packet")
-	}
-	return nil
-}
+// func write(conn net.Conn, m message.Encoder) error {
+// 	buf, err := m.Encode()
+// 	if err != nil {
+// 		log.Debug("failed to encode auth packet ", err)
+// 		return err
+// 	}
+// 	if n, err := conn.Write(buf); err != nil {
+// 		log.Debug("failed to write auth packet ", err)
+// 		return err
+// 	} else if len(buf) != n {
+// 		log.Debug("failed to write enough packet")
+// 		return fmt.Errorf("failed to write enough packet")
+// 	}
+// 	return nil
+// }
 
 // Do basic authentication on AUTH phase
 func doBasicAuth(conn net.Conn, cp *message.ConnectProperty) error {
@@ -44,7 +44,7 @@ func doBasicAuth(conn net.Conn, cp *message.ConnectProperty) error {
 		return fmt.Errorf("authentication failed for supplied user/pass")
 	}
 	log.Debug("[BASIC] username/password matched. Authentication success")
-	if err := write(conn, message.NewAuth(message.Success)); err != nil {
+	if err := message.WriteFrame(conn, message.NewAuth(message.Success)); err != nil {
 		return err
 	}
 	return nil
@@ -55,7 +55,7 @@ func doLoginAuth(conn net.Conn, cp *message.ConnectProperty) error {
 	user := string(cp.AuthenticationData)
 	log.Debugf("[LOGIN] user: %s", user)
 	auth := message.NewAuth(message.ContinueAuthentication)
-	if err := write(conn, auth); err != nil {
+	if err := message.WriteFrame(conn, auth); err != nil {
 		return err
 	}
 	frame, payload, err := message.ReceiveFrame(conn)
@@ -76,7 +76,7 @@ func doLoginAuth(conn net.Conn, cp *message.ConnectProperty) error {
 		return fmt.Errorf("authentication failed for supplied user/pass")
 	}
 	log.Debug("[LOGIN] username/password matched. Authentication success")
-	if err := write(conn, message.NewAuth(message.Success)); err != nil {
+	if err := message.WriteFrame(conn, message.NewAuth(message.Success)); err != nil {
 		return err
 	}
 	return nil

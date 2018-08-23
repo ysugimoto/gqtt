@@ -21,6 +21,7 @@ var clients = make(map[string]chan *message.Publish)
 type Broker struct {
 	port         int
 	subscription *Subscription
+	willPacketId uint16
 
 	mu sync.Mutex
 }
@@ -76,10 +77,8 @@ func (b *Broker) handshake(conn net.Conn, timeout time.Duration) (*message.Conne
 				ReasonString: err.Error(),
 			}
 		}
-		if buf, err := ack.Encode(); err != nil {
-			log.Debug("CONNACK encode error: ", err)
-		} else {
-			conn.Write(buf)
+		if err := message.WriteFrame(conn, ack); err != nil {
+			log.Debug("failed to send CONNACK: ", err)
 		}
 		conn.SetDeadline(time.Time{})
 	}()
@@ -127,7 +126,7 @@ func (b *Broker) handleConnection(client *Client) {
 	defer func() {
 		log.Debug("============================ Client closing =======================")
 		b.removeClient(client.Id())
-		client.Close()
+		client.Close(true)
 	}()
 
 	for {
@@ -139,6 +138,22 @@ func (b *Broker) handleConnection(client *Client) {
 	}
 }
 
+func (b *Broker) addClient(client *Client) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	clients[client.Id()] = client.Publisher
+}
+
+func (b *Broker) removeClient(clientId string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if c, ok := clients[clientId]; ok {
+		close(c)
+		delete(clients, clientId)
+		b.subscription.UnsubscribeAll(clientId)
+	}
+}
+
 func (b *Broker) publish(pb *message.Publish) {
 	clientQoS := b.subscription.GetClientsByTopic(pb.TopicName)
 	if len(clientQoS) == 0 {
@@ -147,6 +162,7 @@ func (b *Broker) publish(pb *message.Publish) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	log.Debug("start to send publish packet")
 	for cid, qos := range clientQoS {
 		c, ok := clients[cid]
 		if !ok {
@@ -177,18 +193,19 @@ func (b *Broker) subscribe(client *Client, ss *message.Subscribe) (message.Encod
 	return message.NewSubAck(ss.PacketId, rcs...), nil
 }
 
-func (b *Broker) addClient(client *Client) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	clients[client.Id()] = client.Publisher
-}
-
-func (b *Broker) removeClient(clientId string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if c, ok := clients[clientId]; ok {
-		close(c)
-		delete(clients, clientId)
-		b.subscription.UnsubscribeAll(clientId)
+func (b *Broker) will(c message.Connect) {
+	if !c.FlagWill {
+		log.Debug("client didn't want to use will. Skip")
+		return
 	}
+	log.Debugf("client wants to send will message: qos: %d, topic: %s, body: %s", c.WillQoS, c.WillTopic, c.WillPayload)
+	b.willPacketId++
+	pb := message.NewPublish(b.willPacketId, message.WithQoS(c.WillQoS))
+	pb.SetRetain(c.WillRetain)
+	pb.TopicName = c.WillTopic
+	pb.Body = []byte(c.WillPayload)
+	if c.WillProperty != nil {
+		pb.Property = c.WillProperty.ToPublish()
+	}
+	b.publish(pb)
 }

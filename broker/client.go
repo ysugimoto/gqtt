@@ -48,8 +48,10 @@ func NewClient(conn net.Conn, info message.Connect, ctx context.Context, b *Brok
 	} else {
 		client.pingInterval = time.Duration(defaultKeepAlive) * time.Second
 	}
-	log.Debug(client.pingInterval)
-	client.timeout = time.AfterFunc(client.pingInterval, client.terminate)
+	client.timeout = time.AfterFunc(client.pingInterval, func() {
+		log.Debug("keepalive timeout")
+		client.terminate()
+	})
 
 	go func() {
 		for {
@@ -59,7 +61,7 @@ func NewClient(conn net.Conn, info message.Connect, ctx context.Context, b *Brok
 					return
 				}
 				if err := client.publish(pb); err != nil {
-					client.Close()
+					client.Close(true)
 				}
 			}
 		}
@@ -73,7 +75,7 @@ func (c *Client) publish(pb *message.Publish) error {
 	log.Debugf("broker publish to client: qos: %d, message: %s\n", pb.QoS, string(pb.Body))
 	switch pb.QoS {
 	case message.QoS0:
-		if err := c.session.Write(pb); err != nil {
+		if err := message.WriteFrame(c.conn, pb); err != nil {
 			return err
 		}
 	case message.QoS1:
@@ -93,8 +95,10 @@ func (c *Client) publish(pb *message.Publish) error {
 			log.Debug("failed to type conversion fto PUBREC or OoS2")
 			return errors.New("failed to type conversion fto PUBREC or OoS2")
 		}
+		time.Sleep(10 * time.Millisecond)
 		// On QoS2, need to send more packet for PUBREL
 		pl := message.NewPubRel(pb.PacketId)
+		log.Debug("success to receive PUBREC: ", pl.PacketId)
 		if ack, err := c.session.Start(pb.PacketId, message.PUBCOMP, pl, session.MaxRetries); err != nil {
 			log.Debug("failed to pubrel session for OoS2: ", err)
 			return err
@@ -114,11 +118,14 @@ func (c *Client) Id() string {
 	return c.id
 }
 
-func (c *Client) Close() {
+func (c *Client) Close(isWill bool) {
 	c.once.Do(func() {
 		c.terminate()
-		c.conn.Close()
 		c.timeout.Stop()
+		c.conn.Close()
+		if isWill {
+			c.broker.will(c.info)
+		}
 	})
 }
 
@@ -137,16 +144,17 @@ func (c *Client) loop() {
 		}
 		var ack message.Encoder
 		switch frame.Type {
+		case message.DISCONNECT:
+			c.Close(false)
+			return
 		case message.PINGREQ:
 			if _, err := message.ParsePingReq(frame, payload); err != nil {
 				log.Debugf("failed to parse packet to PINGREQ: %s\n", err.Error())
 				return
 			}
-			log.Debugf("client PINGREQ received: %s\n", c.Id())
-
 			// Extend expiration and respond PINGRESP
 			c.timeout.Reset(c.pingInterval)
-			if err := c.session.Write(message.NewPingResp()); err != nil {
+			if err := message.WriteFrame(c.conn, message.NewPingResp()); err != nil {
 				log.Debug("failed to send PINGRESP: ", err)
 				return
 			}
@@ -160,7 +168,7 @@ func (c *Client) loop() {
 			if ack, err = c.broker.subscribe(c, ss); err != nil {
 				log.Debugf("failed to add subscribe: %s\n", err.Error())
 				return
-			} else if err := c.session.Write(ack); err != nil {
+			} else if err := message.WriteFrame(c.conn, ack); err != nil {
 				log.Debug("failed to send SUBACK: ", err)
 				return
 			}
@@ -177,7 +185,7 @@ func (c *Client) loop() {
 				c.broker.publish(pb)
 			case message.QoS1:
 				// QoS1 publishes message and respond PUBACK
-				if err := c.session.Write(message.NewPubAck(pb.PacketId)); err != nil {
+				if err := message.WriteFrame(c.conn, message.NewPubAck(pb.PacketId)); err != nil {
 					log.Debug("failed to send PUBACK: ", err)
 					return
 				}
@@ -185,7 +193,7 @@ func (c *Client) loop() {
 			case message.QoS2:
 				// QoS2 stores message and publish after PUBREL packet received
 				c.session.StoreMessage(pb)
-				if err := c.session.Write(message.NewPubRec(pb.PacketId)); err != nil {
+				if err := message.WriteFrame(c.conn, message.NewPubRec(pb.PacketId)); err != nil {
 					log.Debug("failed to send PUBREC: ", err)
 					return
 				}
@@ -221,12 +229,12 @@ func (c *Client) loop() {
 				log.Debug("Broker recevied PUBREL packet, but message didn't exist")
 				continue
 			}
-			if err := c.session.Write(message.NewPubComp(pl.PacketId)); err != nil {
+			if err := message.WriteFrame(c.conn, message.NewPubComp(pl.PacketId)); err != nil {
 				log.Debug("failed to send PUBCOMP pakcet: ", err)
 				continue
 			}
-			c.broker.publish(pb)
 			c.session.DeleteMessage(pl.PacketId)
+			c.broker.publish(pb)
 		case message.PUBCOMP:
 			pc, err := message.ParsePubComp(frame, payload)
 			if err != nil {

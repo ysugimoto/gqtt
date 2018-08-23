@@ -24,3 +24,7 @@ func WithBasicAuth(user, password string) Option {
 func WithLoginAuth(user, password string) Option {
 	return client.WithLoginAuth(user, password)
 }
+
+func WithWill(qos message.QoSLevel, retain bool, topic, payload string, property *message.WillProperty) Option {
+	return client.WithWill(qos, retain, topic, payload, property)
+}

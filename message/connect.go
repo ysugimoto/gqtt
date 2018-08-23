@@ -83,6 +83,17 @@ func (w *WillProperty) ToProp() *Property {
 	}
 }
 
+func (w *WillProperty) ToPublish() *PublishProperty {
+	return &PublishProperty{
+		PayloadFormatIndicator: w.PayloadFormatIndicator,
+		MessageExpiryInterval:  w.MessageExpiryInterval,
+		ContentType:            w.ContentType,
+		ResponseTopic:          w.ResponseTopic,
+		CorrelationData:        w.CorrelationData,
+		UserProperty:           w.UserProperty,
+	}
+}
+
 func ParseConnect(f *Frame, p []byte) (c *Connect, err error) {
 	c = &Connect{
 		Frame: f,

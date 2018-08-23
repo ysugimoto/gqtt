@@ -2,9 +2,15 @@ package message
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"time"
+
+	"github.com/ysugimoto/gqtt/internal/log"
 )
+
+var socketWait = 10 * time.Millisecond
 
 type Packet struct {
 	Frame   *Frame
@@ -106,5 +112,24 @@ func ReceiveFrame(r io.Reader) (*Frame, []byte, error) {
 	if _, err = reader.Read(payload); err != nil {
 		return f, nil, err
 	}
+	time.Sleep(socketWait)
+	log.Debug("<<----------------- ", f.Type)
 	return f, payload, nil
+}
+
+func WriteFrame(w io.Writer, m Encoder) error {
+	buf, err := m.Encode()
+	if err != nil {
+		return err
+	}
+
+	if n, err := w.Write(buf); err != nil {
+		return err
+	} else if n != len(buf) {
+		return errors.New("could not write enough packet")
+	}
+
+	time.Sleep(socketWait)
+	log.Debug("----------------->> ", m.GetType())
+	return nil
 }
