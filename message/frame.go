@@ -10,7 +10,7 @@ import (
 	"github.com/ysugimoto/gqtt/internal/log"
 )
 
-var socketWait = 10 * time.Millisecond
+var socketWait = time.Millisecond
 
 type Packet struct {
 	Frame   *Frame
