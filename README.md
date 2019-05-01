@@ -123,6 +123,7 @@ This package now implements partial features. See following checks:
 - [x] Will message
 - [x] Wildcard topics
 - [x] User Property
+- [ ] MQTT over WebSocket
 - [ ] Connect redirection
 - [ ] Request/Response feature
 - [ ] Auth challenge (now experimental. Only basic/login auth with `admin/admin`)
