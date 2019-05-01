@@ -1,7 +1,7 @@
 package message
 
 import (
-	"errors"
+	"github.com/pkg/errors"
 )
 
 type Connect struct {
@@ -102,13 +102,13 @@ func ParseConnect(f *Frame, p []byte) (c *Connect, err error) {
 	var b int
 	dec := newDecoder(p)
 	if c.ProtocolName, err = dec.String(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as string")
 	}
 	if c.ProtocolVersion, err = dec.Uint(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as uint")
 	}
 	if b, err = dec.Int(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as int")
 	}
 	c.FlagUsername = ((b >> 7) & 0x01) > 0
 	c.FlagPassword = ((b >> 6) & 0x01) > 0
@@ -118,39 +118,39 @@ func ParseConnect(f *Frame, p []byte) (c *Connect, err error) {
 	c.CleanStart = ((b >> 1) & 0x01) > 0
 
 	if c.KeepAlive, err = dec.Uint16(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as uint16")
 	}
 	// Connection variable properties enables on v5
 	if prop, err := dec.Property(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode property")
 	} else if prop != nil {
 		c.Property = prop.ToConnect()
 	}
 	if c.ClientId, err = dec.String(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as string")
 	}
 	// Will properties enables on v5
 	if prop, err := dec.Property(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode will property")
 	} else if prop != nil {
 		c.WillProperty = prop.ToWill()
 	}
 	if c.FlagWill {
 		if c.WillTopic, err = dec.String(); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode will topic")
 		}
 		if c.WillPayload, err = dec.String(); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode will payload")
 		}
 	}
 	if c.FlagUsername {
 		if c.Username, err = dec.String(); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode username")
 		}
 	}
 	if c.FlagPassword {
 		if c.Password, err = dec.Binary(); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode password")
 		}
 	}
 	return c, nil
@@ -171,7 +171,7 @@ func (c *Connect) Validate() error {
 
 func (c *Connect) Encode() ([]byte, error) {
 	if err := c.Validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "CONNECT encode validation error")
 	}
 
 	eb := func(b bool) int {

@@ -2,11 +2,11 @@ package broker
 
 import (
 	"context"
-	"errors"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/satori/go.uuid"
 	"github.com/ysugimoto/gqtt/internal/log"
 	"github.com/ysugimoto/gqtt/message"
@@ -76,12 +76,12 @@ func (c *Client) publish(pb *message.Publish) error {
 	switch pb.QoS {
 	case message.QoS0:
 		if err := message.WriteFrame(c.conn, pb); err != nil {
-			return err
+			return errors.Wrap(err, "failed to write publish packet")
 		}
 	case message.QoS1:
 		if ack, err := c.session.Start(pb.PacketId, message.PUBACK, pb, session.MaxRetries); err != nil {
 			log.Debug("failed to publish session for OoS1: ", err)
-			return err
+			return errors.Wrap(err, "failed to publish session for QoS1")
 		} else if _, ok := ack.(*message.PubAck); !ok {
 			log.Debug("failed to type conversion for OoS1")
 			return errors.New("failed to type conversion for OoS1")
@@ -90,7 +90,7 @@ func (c *Client) publish(pb *message.Publish) error {
 	case message.QoS2:
 		if ack, err := c.session.Start(pb.PacketId, message.PUBREC, pb, session.MaxRetries); err != nil {
 			log.Debug("failed to publish session for OoS2: ", err)
-			return err
+			return errors.Wrap(err, "failed to publish session for QoS2")
 		} else if _, ok := ack.(*message.PubRec); !ok {
 			log.Debug("failed to type conversion fto PUBREC or OoS2")
 			return errors.New("failed to type conversion fto PUBREC or OoS2")
@@ -101,7 +101,7 @@ func (c *Client) publish(pb *message.Publish) error {
 		log.Debug("success to receive PUBREC: ", pl.PacketId)
 		if ack, err := c.session.Start(pb.PacketId, message.PUBCOMP, pl, session.MaxRetries); err != nil {
 			log.Debug("failed to pubrel session for OoS2: ", err)
-			return err
+			return errors.Wrap(err, "failed to pubrel session for QoS2")
 		} else if _, ok := ack.(*message.PubComp); !ok {
 			log.Debug("failed to type conversion to PUBCOMP for OoS2")
 			return errors.New("failed to type conversion to PUBCOMP for OoS2")

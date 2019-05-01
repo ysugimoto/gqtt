@@ -1,7 +1,7 @@
 package message
 
 import (
-	"errors"
+	"github.com/pkg/errors"
 )
 
 type Publish struct {
@@ -71,21 +71,21 @@ func ParsePublish(f *Frame, p []byte) (pb *Publish, err error) {
 	}
 	dec := newDecoder(p)
 	if pb.TopicName, err = dec.String(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as string")
 	}
 	// PacketId exists only QoS is greater than 0
 	if f.QoS > 0 {
 		if pb.PacketId, err = dec.Uint16(); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode as uint16")
 		}
 	}
 	if prop, err := dec.Property(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode property")
 	} else if prop != nil {
 		pb.Property = prop.ToPublish()
 	}
 	if pb.Body, err = dec.BinaryAll(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as binary slice")
 	}
 	return pb, nil
 }
@@ -109,7 +109,7 @@ func (p *Publish) Validate() error {
 
 func (p *Publish) Encode() ([]byte, error) {
 	if err := p.Validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "PUBLISH validation error")
 	}
 	enc := newEncoder()
 	enc.String(p.TopicName)

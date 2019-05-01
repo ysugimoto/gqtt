@@ -1,8 +1,9 @@
 package message
 
 import (
-	"errors"
 	"io"
+
+	"github.com/pkg/errors"
 )
 
 type PubRec struct {
@@ -32,11 +33,11 @@ func ParsePubRec(f *Frame, p []byte) (pr *PubRec, err error) {
 	}
 	dec := newDecoder(p)
 	if pr.PacketId, err = dec.Uint16(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as uint16")
 	}
 	if rc, err := dec.Uint(); err != nil {
 		if err != io.EOF {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode as uint")
 		}
 		return pr, nil
 	} else if !IsReasonCodeAvailable(rc) {
@@ -47,7 +48,7 @@ func ParsePubRec(f *Frame, p []byte) (pr *PubRec, err error) {
 
 	if prop, err := dec.Property(); err != nil {
 		if err != io.EOF {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode property")
 		}
 	} else if prop != nil {
 		pr.Property = prop.ToPubRec()
@@ -71,7 +72,7 @@ func (p *PubRec) Validate() error {
 
 func (p *PubRec) Encode() ([]byte, error) {
 	if err := p.Validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "PUBREC validation error")
 	}
 
 	enc := newEncoder()

@@ -2,21 +2,23 @@ package client
 
 import (
 	"context"
-	"errors"
+	"net"
+	"sync"
+	"time"
+
+	"sync/atomic"
+
+	"github.com/pkg/errors"
 	"github.com/ysugimoto/gqtt/internal/log"
 	"github.com/ysugimoto/gqtt/message"
 	"github.com/ysugimoto/gqtt/session"
-	"net"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 type ConnectionOption = message.ConnectProperty
 type ServerInfo = message.ConnAckProperty
 
 type Client struct {
-	packetId uint32
+	packetId *uint32
 	url      string
 	conn     net.Conn
 	ctx      context.Context
@@ -31,8 +33,10 @@ type Client struct {
 }
 
 func NewClient(u string) *Client {
+	var packetId uint32 = 0
 	return &Client{
-		url: u,
+		packetId: &packetId,
+		url:      u,
 	}
 }
 
@@ -40,7 +44,7 @@ func (c *Client) Connect(ctx context.Context, options ...ClientOption) error {
 	var err error
 
 	if c.conn, c.ServerInfo, err = connect(c.url, options); err != nil {
-		return err
+		return errors.Wrap(err, "failed to connect to "+c.url)
 	}
 
 	log.Debug("connection established!")
@@ -177,12 +181,12 @@ func (c *Client) mainLoop() {
 }
 
 func (c *Client) makePacketId() uint16 {
-	if c.packetId == 0xFFFF {
-		atomic.StoreUint32(&c.packetId, 1)
+	if *c.packetId == 0xFFFF {
+		atomic.StoreUint32(c.packetId, 1)
 	} else {
-		c.packetId = atomic.AddUint32(&c.packetId, 1)
+		atomic.AddUint32(c.packetId, 1)
 	}
-	return uint16(c.packetId)
+	return uint16(*c.packetId)
 }
 
 func (c *Client) Subscribe(topic string, qos message.QoSLevel) error {
@@ -225,36 +229,36 @@ func (c *Client) Publish(topic string, body []byte, opts ...ClientOption) error 
 		// If OoS is zero, we don't need packet identifier and any acknowledgment
 		if err := message.WriteFrame(c.conn, pb); err != nil {
 			log.Debug("failed to send publish with QoS0 ", err)
-			return err
+			return errors.Wrap(err, "failed to send publish with QoS0")
 		}
 	case message.QoS1:
 		pb.PacketId = c.makePacketId()
 		if ack, err := c.session.Start(pb.PacketId, message.PUBACK, pb, session.MaxRetries); err != nil {
-			log.Debug("failed to publish session for OoS1: ", err)
-			return err
+			log.Debug("failed to publish session for QoS1: ", err)
+			return errors.Wrap(err, "failed to publish session for QoS1")
 		} else if _, ok := ack.(*message.PubAck); !ok {
 			log.Debug("failed to type conversion for OoS1")
-			return errors.New("failed to type conversion for OoS1")
+			return errors.New("failed to type conversion for QoS1")
 		}
 	case message.QoS2:
 		pb.PacketId = c.makePacketId()
 		if ack, err := c.session.Start(pb.PacketId, message.PUBREC, pb, session.MaxRetries); err != nil {
-			log.Debug("failed to publish session for OoS2: ", err)
-			return err
+			log.Debug("failed to publish session for QoS2: ", err)
+			return errors.Wrap(err, "failed to publish session for QoS2")
 		} else if _, ok := ack.(*message.PubRec); !ok {
-			log.Debug("failed to type conversion fto PUBREC or OoS2")
-			return errors.New("failed to type conversion fto PUBREC or OoS2")
+			log.Debug("failed to type conversion fto PUBREC or QoS2")
+			return errors.New("failed to type conversion fto PUBREC or QoS2")
 		}
 		log.Debug("PUBREC received. Send PUBREL")
 		time.Sleep(10 * time.Millisecond)
 		// On QoS2, need to send more packet for PUBREL
 		pl := message.NewPubRel(pb.PacketId)
 		if ack, err := c.session.Start(pb.PacketId, message.PUBCOMP, pl, session.MaxRetries); err != nil {
-			log.Debug("failed to pubrel session for OoS2: ", err)
-			return err
+			log.Debug("failed to pubrel session for QoS2: ", err)
+			return errors.Wrap(err, "failed to pubrel session for QoS2")
 		} else if _, ok := ack.(*message.PubComp); !ok {
-			log.Debug("failed to type conversion to PUBCOMP for OoS2")
-			return errors.New("failed to type conversion to PUBCOMP for OoS2")
+			log.Debug("failed to type conversion to PUBCOMP for QoS2")
+			return errors.New("failed to type conversion to PUBCOMP for QoS2")
 		}
 	}
 	return nil
@@ -269,14 +273,14 @@ func (c *Client) receivePublish(pb *message.Publish) error {
 		log.Debug("Send PUBACK to the publisher")
 		if err := message.WriteFrame(c.conn, message.NewPubAck(pb.PacketId)); err != nil {
 			log.Debug("failed to send PUBACK packet")
-			return err
+			return errors.Wrap(err, "failed to send PUBACK packet")
 		}
 		c.Message <- pb
 	case message.QoS2:
 		c.session.StoreMessage(pb)
 		if err := message.WriteFrame(c.conn, message.NewPubRec(pb.PacketId)); err != nil {
 			log.Debug("failed to send PUBREC packet")
-			return err
+			return errors.Wrap(err, "failed to send PUBREC packet")
 		}
 		log.Debugf("Message saved for packetID: %d\n", pb.PacketId)
 	default:

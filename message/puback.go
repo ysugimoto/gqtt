@@ -1,8 +1,9 @@
 package message
 
 import (
-	"errors"
 	"io"
+
+	"github.com/pkg/errors"
 )
 
 type PubAck struct {
@@ -32,11 +33,11 @@ func ParsePubAck(f *Frame, p []byte) (pa *PubAck, err error) {
 	}
 	dec := newDecoder(p)
 	if pa.PacketId, err = dec.Uint16(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as uint16")
 	}
 	if rc, err := dec.Uint(); err != nil {
 		if err != io.EOF {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode uint")
 		}
 		return pa, nil
 	} else if !IsReasonCodeAvailable(rc) {
@@ -47,7 +48,7 @@ func ParsePubAck(f *Frame, p []byte) (pa *PubAck, err error) {
 
 	if prop, err := dec.Property(); err != nil {
 		if err != io.EOF {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode property")
 		}
 	} else if prop != nil {
 		pa.Property = prop.ToPubAck()
@@ -71,7 +72,7 @@ func (p *PubAck) Validate() error {
 
 func (p *PubAck) Encode() ([]byte, error) {
 	if err := p.Validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "PUBACK validation error")
 	}
 	enc := newEncoder()
 	enc.Uint16(p.PacketId)

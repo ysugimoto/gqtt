@@ -2,12 +2,12 @@ package session
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/ysugimoto/gqtt/internal/log"
 	"github.com/ysugimoto/gqtt/message"
 )
@@ -42,7 +42,7 @@ func (s *Session) recoverError(err error) error {
 		log.Debugf("write error occured, but keep connection due to session is running: %s", err.Error())
 		return nil
 	}
-	return err
+	return errors.Wrap(err, "failed to recover error")
 }
 
 func (s *Session) Write(msg message.Encoder) error {
@@ -57,12 +57,12 @@ func (s *Session) Write(msg message.Encoder) error {
 	buf, err := msg.Encode()
 	if err != nil {
 		log.Debug("failed to encode message ", err)
-		return s.recoverError(err)
+		return s.recoverError(errors.Wrap(err, "failed to encode message"))
 	}
 
 	if n, err := s.conn.Write(buf); err != nil {
 		log.Debug("failed to write packet: ", buf)
-		return s.recoverError(err)
+		return s.recoverError(errors.Wrap(err, "failed to write packet"))
 	} else if n != len(buf) {
 		log.Debug("could not enough patck")
 		return s.recoverError(errors.New("could not write enough packet"))
@@ -92,14 +92,14 @@ func (s *Session) Start(ident uint16, meet message.MessageType, msg message.Enco
 
 	// Send message
 	if err := message.WriteFrame(s.conn, msg); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to send message")
 	}
 	// wait or timeout
 	select {
 	case <-ctx.Done():
 		retry--
 		if retry < 0 {
-			return nil, ctx.Err()
+			return nil, errors.Wrap(ctx.Err(), "max retry times exceeded")
 		}
 		log.Debugf("Session retry for type: %s\n", meet)
 		time.Sleep(3 * time.Second)
@@ -113,7 +113,7 @@ func (s *Session) Start(ident uint16, meet message.MessageType, msg message.Enco
 func (s *Session) Meet(ident uint16, meet message.MessageType, msg interface{}) error {
 	v, ok := s.stack.Load(ident)
 	if !ok {
-		return fmt.Errorf("session not found for ident: %d", ident)
+		return errors.New("session not found for ident: " + fmt.Sprint(ident))
 	}
 	defer s.stack.Delete(ident)
 	log.Debugf("stack deleted for ident: %d", ident)

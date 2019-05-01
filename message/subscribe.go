@@ -1,8 +1,9 @@
 package message
 
 import (
-	"errors"
 	"io"
+
+	"github.com/pkg/errors"
 )
 
 type Subscribe struct {
@@ -41,10 +42,10 @@ func ParseSubscribe(f *Frame, p []byte) (s *Subscribe, err error) {
 
 	dec := newDecoder(p)
 	if s.PacketId, err = dec.Uint16(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as uint16")
 	}
 	if prop, err := dec.Property(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode property")
 	} else if prop != nil {
 		s.Property = prop.ToSubscribe()
 	}
@@ -56,10 +57,10 @@ func ParseSubscribe(f *Frame, p []byte) (s *Subscribe, err error) {
 			if err == io.EOF {
 				break
 			}
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode as string")
 		}
 		if b, err = dec.Int(); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode as int")
 		}
 		st := SubscribeTopic{
 			RetainHandling: uint8((b >> 4) & 0x03),
@@ -98,7 +99,7 @@ func (s *Subscribe) Validate() error {
 
 func (s *Subscribe) Encode() ([]byte, error) {
 	if err := s.Validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "SUBSCRIBE validation error")
 	}
 
 	enc := newEncoder()

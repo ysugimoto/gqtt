@@ -1,8 +1,9 @@
 package message
 
 import (
-	"errors"
 	"io"
+
+	"github.com/pkg/errors"
 )
 
 type PubComp struct {
@@ -32,11 +33,11 @@ func ParsePubComp(f *Frame, p []byte) (pc *PubComp, err error) {
 	}
 	dec := newDecoder(p)
 	if pc.PacketId, err = dec.Uint16(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as uint16")
 	}
 	if rc, err := dec.Uint(); err != nil {
 		if err != io.EOF {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode as uint")
 		}
 		return pc, nil
 	} else if !IsReasonCodeAvailable(rc) {
@@ -47,7 +48,7 @@ func ParsePubComp(f *Frame, p []byte) (pc *PubComp, err error) {
 
 	if prop, err := dec.Property(); err != nil {
 		if err != io.EOF {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode property")
 		}
 	} else if prop != nil {
 		pc.Property = prop.ToPubComp()
@@ -71,7 +72,7 @@ func (p *PubComp) Validate() error {
 
 func (p *PubComp) Encode() ([]byte, error) {
 	if err := p.Validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "PUBCOMP validation error")
 	}
 
 	enc := newEncoder()

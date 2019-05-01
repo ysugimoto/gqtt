@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/ysugimoto/gqtt/internal/log"
 	"github.com/ysugimoto/gqtt/message"
 )
@@ -23,7 +24,7 @@ func formatTopicPath(path string) string {
 var clients = make(map[string]chan *message.Publish)
 
 type Broker struct {
-	port         int
+	addr         string
 	subscription *Subscription
 	willPacketId uint16
 	MessageEvent chan interface{}
@@ -31,22 +32,22 @@ type Broker struct {
 	mu sync.Mutex
 }
 
-func NewBroker(port int) *Broker {
+func NewBroker(addr string) *Broker {
 	return &Broker{
-		port:         port,
+		addr:         addr,
 		subscription: NewSubscription(),
 		MessageEvent: make(chan interface{}, capEventSize),
 	}
 }
 
 func (b *Broker) ListenAndServe(ctx context.Context) error {
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", b.port))
+	listener, err := net.Listen("tcp", b.addr)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to listen TCP socket")
 	}
 
 	defer listener.Close()
-	log.Debugf("Broker server started at :%d", b.port)
+	log.Debugf("Broker server started at %s", b.addr)
 
 	for {
 		s, err := listener.Accept()
@@ -102,18 +103,18 @@ func (b *Broker) handshake(conn net.Conn, timeout time.Duration) (*message.Conne
 	if err != nil {
 		log.Debug("receive frame error: ", err)
 		reason = message.MalformedPacket
-		return nil, err
+		return nil, errors.Wrap(err, "failed to receive packet")
 	}
 	cn, err = message.ParseConnect(frame, payload)
 	if err != nil {
 		reason = message.MalformedPacket
 		log.Debug("frame expects connect package: ", err)
-		return nil, err
+		return nil, errors.Wrap(err, "Malformed packet received")
 	}
 	if err := b.authConnect(conn, cn.Property); err != nil {
 		reason = message.NotAuthorized
 		log.Debug("connection not authorized")
-		return nil, err
+		return nil, errors.Wrap(err, "Not Authorized")
 	}
 	reason = message.Success
 	log.Debugf("CONNECT accepted: %+v\n", cn)
@@ -214,7 +215,7 @@ func (b *Broker) subscribe(client *Client, ss *message.Subscribe) (message.Encod
 	for _, t := range ss.Subscriptions {
 		rc, err := b.subscription.Subscribe(client.Id(), t)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to subscribe: "+t.TopicName)
 		}
 		rcs = append(rcs, rc)
 	}

@@ -1,8 +1,9 @@
 package message
 
 import (
-	"errors"
 	"io"
+
+	"github.com/pkg/errors"
 )
 
 type SubAck struct {
@@ -33,10 +34,10 @@ func ParseSubAck(f *Frame, p []byte) (s *SubAck, err error) {
 
 	dec := newDecoder(p)
 	if s.PacketId, err = dec.Uint16(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as uint16")
 	}
 	if prop, err := dec.Property(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode property")
 	} else if prop != nil {
 		s.Property = prop.ToSubAck()
 	}
@@ -45,7 +46,7 @@ func ParseSubAck(f *Frame, p []byte) (s *SubAck, err error) {
 			if err == io.EOF {
 				break
 			}
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode uint")
 		} else if !IsReasonCodeAvailable(rc) {
 			return nil, errors.New("invalid reason code supplied")
 		} else {
@@ -81,7 +82,7 @@ func (s *SubAck) Validate() error {
 
 func (s *SubAck) Encode() ([]byte, error) {
 	if err := s.Validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "SUBACK validation error")
 	}
 	enc := newEncoder()
 	enc.Uint16(s.PacketId)
