@@ -38,7 +38,7 @@ func main() {
 	// Hooks of messages
 	for evt := range server.MessageEvent {
 		switch e := evt.(type) {
-    // Client subscribed
+		// Client subscribed
 		case *message.Subscribe:
 			log.Println("Received SUBSCRIBE event: ", e.GetType())
 		// Client connected
