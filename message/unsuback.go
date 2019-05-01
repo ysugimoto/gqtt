@@ -1,8 +1,9 @@
 package message
 
 import (
-	"errors"
 	"io"
+
+	"github.com/pkg/errors"
 )
 
 type UnsubAck struct {
@@ -33,10 +34,10 @@ func ParseUnsubAck(f *Frame, p []byte) (u *UnsubAck, err error) {
 
 	dec := newDecoder(p)
 	if u.PacketId, err = dec.Uint16(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as uint16")
 	}
 	if prop, err := dec.Property(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode property")
 	} else if prop != nil {
 		u.Property = prop.ToUnsubAck()
 	}
@@ -45,7 +46,7 @@ func ParseUnsubAck(f *Frame, p []byte) (u *UnsubAck, err error) {
 			if err == io.EOF {
 				break
 			}
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode as uint")
 		} else if !IsReasonCodeAvailable(rc) {
 			return nil, errors.New("invalid reason code supplied")
 		} else {
@@ -80,7 +81,7 @@ func (u *UnsubAck) Validate() error {
 
 func (u *UnsubAck) Encode() ([]byte, error) {
 	if err := u.Validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "UNSUBACK validation error")
 	}
 	enc := newEncoder()
 	enc.Uint16(u.PacketId)

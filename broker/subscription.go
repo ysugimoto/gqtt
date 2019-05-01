@@ -1,11 +1,11 @@
 package broker
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/pkg/errors"
 	"github.com/ysugimoto/gqtt/internal/log"
 	"github.com/ysugimoto/gqtt/message"
 )
@@ -49,7 +49,7 @@ func (s *Subscription) Unsubscribe(clientId, topic string) {
 func (s *Subscription) Subscribe(clientId string, t message.SubscribeTopic) (message.ReasonCode, error) {
 	targets, err := s.FindTopics(t.TopicName)
 	if err != nil {
-		return message.UnspecifiedError, err
+		return message.UnspecifiedError, errors.Wrap(err, "topic not found: "+t.TopicName)
 	} else if len(targets) == 0 {
 		// If target hasn't created yet, create new topic.
 		// But, topic name has wildcard, we'll skip it
@@ -82,7 +82,7 @@ func (s *Subscription) Subscribe(clientId string, t message.SubscribeTopic) (mes
 	case message.QoS2:
 		return message.GrantedQoS2, nil
 	default:
-		return message.QoSNotSupported, fmt.Errorf("Unexpected Qos")
+		return message.QoSNotSupported, errors.New("Unexpected Qos")
 	}
 }
 
@@ -93,11 +93,11 @@ func (s *Subscription) CompileTopicRegex(topic string) (*regexp.Regexp, error) {
 		if topic != "#" {
 			// MLW must present after topic division character
 			if topic[mlw-1] != '/' {
-				return nil, fmt.Errorf("Multi-level wildcard must present after topic division chacater of `/`")
+				return nil, errors.New("Multi-level wildcard must present after topic division chacater of `/`")
 			}
 			// MLW must present at last character of topic name
 			if mlw != len(topic)-1 {
-				return nil, fmt.Errorf("Multi-level wildcard must present at last character")
+				return nil, errors.New("Multi-level wildcard must present at last character")
 			}
 		}
 	}
@@ -107,7 +107,7 @@ func (s *Subscription) CompileTopicRegex(topic string) (*regexp.Regexp, error) {
 		if topic != "+" {
 			// SLW must present after topic division character
 			if topic[slw-1] != '/' {
-				return nil, fmt.Errorf("Single-level wildcard must present after topic division chacater of `/`")
+				return nil, errors.New("Single-level wildcard must present after topic division chacater of `/`")
 			}
 		}
 	}
@@ -116,7 +116,11 @@ func (s *Subscription) CompileTopicRegex(topic string) (*regexp.Regexp, error) {
 	t = strings.Replace(t, "/#", ".*", -1)
 	t += "$"
 
-	return regexp.Compile(t)
+	if r, err := regexp.Compile(t); err != nil {
+		return nil, errors.Wrap(err, "failed to compile regex for topic")
+	} else {
+		return r, nil
+	}
 }
 
 func (s *Subscription) FindTopics(topic string) ([]string, error) {
@@ -124,7 +128,7 @@ func (s *Subscription) FindTopics(topic string) ([]string, error) {
 	r, err := s.CompileTopicRegex(topic)
 	if err != nil {
 		log.Debug("failed to compile regex: ", topic, err)
-		return nil, err
+		return nil, errors.Wrap(err, "failed to compile regex for finding topics")
 	}
 	topics := []string{}
 	s.topics.Range(func(k, v interface{}) bool {

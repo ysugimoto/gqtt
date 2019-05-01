@@ -2,11 +2,11 @@ package message
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/ysugimoto/gqtt/internal/log"
 )
 
@@ -81,7 +81,7 @@ func ReceiveFrame(r io.Reader) (*Frame, []byte, error) {
 	// Read and extract first byte
 	packet, err = reader.ReadByte()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, errors.Wrap(err, "failed to read first byte")
 	}
 	b := int(packet)
 	f := &Frame{
@@ -91,14 +91,14 @@ func ReceiveFrame(r io.Reader) (*Frame, []byte, error) {
 		RETAIN: decodeBool((b & 0x01)),
 	}
 	if !IsQoSAvaliable(uint8(f.QoS)) {
-		return nil, nil, fmt.Errorf("invalid QoS level specified: %x", f.QoS)
+		return nil, nil, errors.New(fmt.Sprintf("invalid QoS level specified: %x", f.QoS))
 	}
 
 	// Read variable remain length
 	var mul uint64 = 1
 	for {
 		if packet, err = reader.ReadByte(); err != nil {
-			return nil, nil, err
+			return nil, nil, errors.Wrap(err, "failed to read remain length byte")
 		}
 		size += uint64(packet&0x7F) * mul
 		mul *= 0x80
@@ -110,7 +110,7 @@ func ReceiveFrame(r io.Reader) (*Frame, []byte, error) {
 	payload := make([]byte, size)
 	// There are case that length is zero on PINGREQ, PINGRESP
 	if _, err = reader.Read(payload); err != nil {
-		return f, nil, err
+		return f, nil, errors.Wrap(err, "failed to read payload")
 	}
 	time.Sleep(socketWait)
 	log.Debug("<<----------------- ", f.Type)
@@ -120,11 +120,11 @@ func ReceiveFrame(r io.Reader) (*Frame, []byte, error) {
 func WriteFrame(w io.Writer, m Encoder) error {
 	buf, err := m.Encode()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "faileed to encode message")
 	}
 
 	if n, err := w.Write(buf); err != nil {
-		return err
+		return errors.Wrap(err, "failed to write encoded message")
 	} else if n != len(buf) {
 		return errors.New("could not write enough packet")
 	}

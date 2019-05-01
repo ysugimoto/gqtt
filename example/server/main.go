@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	server := gqtt.NewBroker(9999)
+	server := gqtt.NewBroker(":9999")
 	ctx := context.Background()
 	go server.ListenAndServe(ctx)
 	for evt := range server.MessageEvent {

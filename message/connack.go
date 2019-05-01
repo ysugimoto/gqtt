@@ -1,8 +1,9 @@
 package message
 
 import (
-	"errors"
 	"io"
+
+	"github.com/pkg/errors"
 )
 
 type ConnAck struct {
@@ -61,12 +62,12 @@ func ParseConnAck(f *Frame, p []byte) (c *ConnAck, err error) {
 	}
 	dec := newDecoder(p)
 	if i, err := dec.Int(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as int")
 	} else {
 		c.SessionPresentFlag = (i & 0x01) > 0
 	}
 	if rc, err := dec.Uint(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to decode as uint")
 	} else if !IsReasonCodeAvailable(rc) {
 		return nil, errors.New("unexpected reason code supplied")
 	} else {
@@ -75,7 +76,7 @@ func ParseConnAck(f *Frame, p []byte) (c *ConnAck, err error) {
 
 	if prop, err := dec.Property(); err != nil {
 		if err != io.EOF {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode property")
 		}
 	} else if prop != nil {
 		c.Property = prop.ToConnAck()
@@ -100,7 +101,7 @@ func (c *ConnAck) Validate() error {
 
 func (c *ConnAck) Encode() ([]byte, error) {
 	if err := c.Validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "CONNACK validation error")
 	}
 	enc := newEncoder()
 	if c.SessionPresentFlag {

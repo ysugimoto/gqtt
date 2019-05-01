@@ -1,8 +1,9 @@
 package message
 
 import (
-	"errors"
 	"io"
+
+	"github.com/pkg/errors"
 )
 
 type Disconnect struct {
@@ -37,7 +38,7 @@ func ParseDisconnect(f *Frame, p []byte) (d *Disconnect, err error) {
 	dec := newDecoder(p)
 	if rc, err := dec.Uint(); err != nil {
 		if err != io.EOF {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode as uint")
 		}
 		return d, nil
 	} else if !IsReasonCodeAvailable(rc) {
@@ -48,7 +49,7 @@ func ParseDisconnect(f *Frame, p []byte) (d *Disconnect, err error) {
 
 	if prop, err := dec.Property(); err != nil {
 		if err != io.EOF {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to decode property")
 		}
 	} else if prop != nil {
 		d.Property = prop.ToDisconnect()

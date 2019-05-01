@@ -1,13 +1,14 @@
 package client
 
 import (
-	"crypto/tls"
-	"encoding/base64"
-	"errors"
 	"net"
-	"net/url"
 	"time"
 
+	"crypto/tls"
+	"encoding/base64"
+	"net/url"
+
+	"github.com/pkg/errors"
 	"github.com/satori/go.uuid"
 	"github.com/ysugimoto/gqtt/internal/log"
 	"github.com/ysugimoto/gqtt/message"
@@ -68,14 +69,14 @@ func connect(u string, opts []ClientOption) (net.Conn, *ServerInfo, error) {
 	switch parsed.Scheme {
 	case "mqtt":
 		if conn, err = net.Dial("tcp", parsed.Host); err != nil {
-			return nil, nil, err
+			return nil, nil, errors.Wrap(err, "failed to dial TCP")
 		}
 	case "mqtts":
 		conf := &tls.Config{
 			ServerName: parsed.Host,
 		}
 		if conn, err = tls.Dial("tcp", parsed.Host, conf); err != nil {
-			return nil, nil, err
+			return nil, nil, errors.Wrap(err, "failed to dial TLS")
 		}
 	default:
 		return nil, nil, errors.New("connection protocol must start with mqtt(s)://")
@@ -84,7 +85,7 @@ func connect(u string, opts []ClientOption) (net.Conn, *ServerInfo, error) {
 	if info, err = handshake(conn, opts); err != nil {
 		log.Debug("failed to handshake with server: ", err)
 		conn.Close()
-		return nil, nil, err
+		return nil, nil, errors.Wrap(err, "failed to handshake with server")
 	}
 	return conn, info, nil
 }
@@ -93,7 +94,7 @@ func handshake(conn net.Conn, opts []ClientOption) (*ServerInfo, error) {
 	c := makeConnectionMessage(opts)
 	if err := message.WriteFrame(conn, c); err != nil {
 		log.Debug("failed to write CONNECT packet: ", err)
-		return nil, err
+		return nil, errors.Wrap(err, "failed to write CONNECT packet")
 	}
 
 	log.Debug("Client wrote connect packet, wait for CONNACK...")
@@ -105,14 +106,14 @@ func handshake(conn net.Conn, opts []ClientOption) (*ServerInfo, error) {
 		frame, payload, err := message.ReceiveFrame(conn)
 		if err != nil {
 			log.Debug("failed to read CONNACK packet: ", err)
-			return nil, err
+			return nil, errors.Wrap(err, "failed to read CONNACK packet")
 		}
 		switch frame.Type {
 		case message.CONNACK:
 			ack, err := message.ParseConnAck(frame, payload)
 			if err != nil {
 				log.Debug("packet parse error for CONNACK: ", err)
-				return nil, err
+				return nil, errors.Wrap(err, "packet parse error for CONNACK")
 			} else if ack.ReasonCode != message.Success {
 				log.Debug("CONNACK doesn't reply success code: ", ack.ReasonCode)
 				return nil, errors.New("CONNACK doesn't reply success code")
@@ -124,7 +125,7 @@ func handshake(conn net.Conn, opts []ClientOption) (*ServerInfo, error) {
 			auth, err := message.ParseAuth(frame, payload)
 			if err != nil {
 				log.Debug("packet parse error for AUTH: ", err)
-				return nil, err
+				return nil, errors.Wrap(err, "packet parse error for AUTH")
 			}
 			switch auth.ReasonCode {
 			case message.Success:
@@ -134,7 +135,7 @@ func handshake(conn net.Conn, opts []ClientOption) (*ServerInfo, error) {
 				continue
 			case message.ContinueAuthentication:
 				if err := authenticate(conn, c.Property); err != nil {
-					return nil, err
+					return nil, errors.Wrap(err, "failed to authenticate")
 				}
 			}
 		default:
@@ -154,7 +155,7 @@ func authenticate(conn net.Conn, prop *message.ConnectProperty) error {
 		}
 		if err := message.WriteFrame(conn, auth); err != nil {
 			log.Debug("failed to send AUTH packet: ", err)
-			return err
+			return errors.Wrap(err, "failed to send AUTH packet")
 		}
 	default:
 		return errors.New("unexpected auth method: " + prop.AuthenticationMethod)
