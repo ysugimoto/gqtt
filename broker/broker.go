@@ -12,6 +12,10 @@ import (
 	"github.com/ysugimoto/gqtt/message"
 )
 
+const (
+	capEventSize = 100
+)
+
 func formatTopicPath(path string) string {
 	return "/" + strings.Trim(path, "/")
 }
@@ -22,6 +26,7 @@ type Broker struct {
 	port         int
 	subscription *Subscription
 	willPacketId uint16
+	MessageEvent chan interface{}
 
 	mu sync.Mutex
 }
@@ -30,6 +35,7 @@ func NewBroker(port int) *Broker {
 	return &Broker{
 		port:         port,
 		subscription: NewSubscription(),
+		MessageEvent: make(chan interface{}, capEventSize),
 	}
 }
 
@@ -57,6 +63,15 @@ func (b *Broker) ListenAndServe(ctx context.Context) error {
 		}
 		client := NewClient(s, *info, ctx, b)
 		go b.handleConnection(client)
+	}
+}
+
+func (b *Broker) sendEvent(msg interface{}) {
+	// Check overflow channel buffer
+	if len(b.MessageEvent) >= capEventSize {
+		log.Debug("Event channle overflow. You have to drain message")
+	} else {
+		b.MessageEvent <- msg
 	}
 }
 
@@ -102,6 +117,7 @@ func (b *Broker) handshake(conn net.Conn, timeout time.Duration) (*message.Conne
 	}
 	reason = message.Success
 	log.Debugf("CONNECT accepted: %+v\n", cn)
+	b.sendEvent(cn)
 	return cn, nil
 }
 
@@ -124,7 +140,7 @@ func (b *Broker) handleConnection(client *Client) {
 	b.addClient(client)
 
 	defer func() {
-		log.Debug("============================ Client closing =======================")
+		log.Debug("====== Client closing ======")
 		b.removeClient(client.Id())
 		client.Close(true)
 	}()
@@ -164,6 +180,7 @@ func (b *Broker) Publish(pb *message.Publish) {
 	defer b.mu.Unlock()
 
 	log.Debug("start to send publish packet")
+	b.sendEvent(pb)
 
 	// Save as retain message is RETAIN bit is active
 	if pb.RETAIN {
@@ -201,6 +218,7 @@ func (b *Broker) subscribe(client *Client, ss *message.Subscribe) (message.Encod
 		}
 		rcs = append(rcs, rc)
 	}
+	b.sendEvent(ss)
 	return message.NewSubAck(ss.PacketId, rcs...), nil
 }
 

@@ -46,7 +46,7 @@ func main() {
 		case <-ticker.C:
 			log.Printf("message publish")
 			ticker.Stop()
-			if err := client.Publish("gqtt/example", message.QoS2, []byte("Hello, MQTT5! from "+sig)); err != nil {
+			if err := client.Publish("gqtt/example", []byte("Hello, MQTT5! from "+sig), gqtt.WithQoS(message.QoS2)); err != nil {
 				return
 			}
 		}
