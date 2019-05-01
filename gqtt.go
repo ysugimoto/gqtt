@@ -28,3 +28,11 @@ func WithLoginAuth(user, password string) Option {
 func WithWill(qos message.QoSLevel, retain bool, topic, payload string, property *message.WillProperty) Option {
 	return client.WithWill(qos, retain, topic, payload, property)
 }
+
+func WithRetain() Option {
+	return client.WithRetain()
+}
+
+func WithQoS(qos message.QoSLevel) Option {
+	return client.WithQoS(qos)
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/ysugimoto/gqtt/session"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,12 +16,11 @@ type ConnectionOption = message.ConnectProperty
 type ServerInfo = message.ConnAckProperty
 
 type Client struct {
-	packetId     uint16
-	url          string
-	conn         net.Conn
-	ctx          context.Context
-	session      *session.Session
-	pingInterval *time.Ticker
+	packetId uint32
+	url      string
+	conn     net.Conn
+	ctx      context.Context
+	session  *session.Session
 
 	Closed  chan struct{}
 	Message chan *message.Publish
@@ -50,19 +50,6 @@ func (c *Client) Connect(ctx context.Context, options ...ClientOption) error {
 	c.Message = make(chan *message.Publish)
 	c.session = session.New(c.conn, c.ctx)
 
-	// TODO: set duration from option
-	go func() {
-		c.pingInterval = time.NewTicker(5 * time.Second)
-		for {
-			select {
-			case <-c.ctx.Done():
-				c.Disconnect()
-				return
-			case <-c.pingInterval.C:
-				message.WriteFrame(c.conn, message.NewPingReq())
-			}
-		}
-	}()
 	go c.mainLoop()
 
 	return nil
@@ -71,7 +58,6 @@ func (c *Client) Connect(ctx context.Context, options ...ClientOption) error {
 func (c *Client) Disconnect() {
 	c.once.Do(func() {
 		log.Debug("============================ Client closing =======================")
-		c.pingInterval.Stop()
 
 		dc := message.NewDisconnect(message.NormalDisconnection)
 		if err := message.WriteFrame(c.conn, dc); err != nil {
@@ -86,12 +72,17 @@ func (c *Client) Disconnect() {
 }
 
 func (c *Client) mainLoop() {
+	pingInterval := time.NewTicker(5 * time.Second)
+	defer pingInterval.Stop()
 	defer c.Disconnect()
+
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Debugf("terminated")
 			return
+		case <-pingInterval.C:
+			message.WriteFrame(c.conn, message.NewPingReq())
 		default:
 			frame, payload, err := message.ReceiveFrame(c.conn)
 			if err != nil {
@@ -187,10 +178,11 @@ func (c *Client) mainLoop() {
 
 func (c *Client) makePacketId() uint16 {
 	if c.packetId == 0xFFFF {
-		c.packetId = 0
+		atomic.StoreUint32(&c.packetId, 1)
+	} else {
+		c.packetId = atomic.AddUint32(&c.packetId, 1)
 	}
-	c.packetId++
-	return c.packetId
+	return uint16(c.packetId)
 }
 
 func (c *Client) Subscribe(topic string, qos message.QoSLevel) error {
@@ -216,11 +208,19 @@ func (c *Client) Subscribe(topic string, qos message.QoSLevel) error {
 	return nil
 }
 
-func (c *Client) Publish(topic string, qos message.QoSLevel, body []byte) error {
-	pb := message.NewPublish(0, message.WithQoS(qos))
+func (c *Client) Publish(topic string, body []byte, opts ...ClientOption) error {
+	pb := message.NewPublish(0, message.WithQoS(message.QoS0))
+	for _, o := range opts {
+		switch o.name {
+		case nameRetain:
+			pb.SetRetain(true)
+		case nameQoS:
+			pb.SetQoS(o.value.(message.QoSLevel))
+		}
+	}
 	pb.TopicName = topic
 	pb.Body = body
-	switch qos {
+	switch pb.QoS {
 	case message.QoS0:
 		// If OoS is zero, we don't need packet identifier and any acknowledgment
 		if err := message.WriteFrame(c.conn, pb); err != nil {

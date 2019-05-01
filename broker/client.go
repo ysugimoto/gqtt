@@ -172,6 +172,17 @@ func (c *Client) loop() {
 				log.Debug("failed to send SUBACK: ", err)
 				return
 			}
+			// Send retain message if exists
+			for _, s := range ss.Subscriptions {
+				retain := c.broker.getRetainMessage(s.TopicName)
+				if retain != nil {
+					log.Debug("Send retain message for topic: ", s.TopicName)
+					retain.SetRetain(true)
+					if err := message.WriteFrame(c.conn, retain); err != nil {
+						log.Debug("failed to send retain message: ", err)
+					}
+				}
+			}
 		case message.PUBLISH:
 			pb, err := message.ParsePublish(frame, payload)
 			if err != nil {
@@ -179,23 +190,30 @@ func (c *Client) loop() {
 				return
 			}
 			log.Debugf("Publish message received with QoS: %d from: %s, body: %s\n", pb.QoS, c.Id(), string(pb.Body))
+
+			// Check retain message deletion
+			// If RETAIN flag is on and message size is zero, then we delete retain message
+			if pb.RETAIN && len(pb.Body) == 0 {
+				log.Debugf("Retain message deletion for topic: %s\n", pb.TopicName)
+				c.broker.deleteRetainMessage(pb.TopicName)
+				continue
+			}
 			switch pb.QoS {
 			case message.QoS0:
 				// QoS0 publishes message immediately
-				c.broker.publish(pb)
+				c.broker.Publish(pb)
 			case message.QoS1:
 				// QoS1 publishes message and respond PUBACK
 				if err := message.WriteFrame(c.conn, message.NewPubAck(pb.PacketId)); err != nil {
 					log.Debug("failed to send PUBACK: ", err)
 					return
 				}
-				c.broker.publish(pb)
+				c.broker.Publish(pb)
 			case message.QoS2:
 				// QoS2 stores message and publish after PUBREL packet received
 				c.session.StoreMessage(pb)
 				if err := message.WriteFrame(c.conn, message.NewPubRec(pb.PacketId)); err != nil {
 					log.Debug("failed to send PUBREC: ", err)
-					return
 				}
 			}
 		case message.PUBACK:
@@ -234,7 +252,7 @@ func (c *Client) loop() {
 				continue
 			}
 			c.session.DeleteMessage(pl.PacketId)
-			c.broker.publish(pb)
+			c.broker.Publish(pb)
 		case message.PUBCOMP:
 			pc, err := message.ParsePubComp(frame, payload)
 			if err != nil {

@@ -10,6 +10,8 @@ const (
 	nameBasicAuth optionName = "basic"
 	nameLoginAuth optionName = "login"
 	nameWill      optionName = "will"
+	nameRetain    optionName = "retain"
+	nameQoS       optionName = "qos"
 )
 
 type ClientOption struct {
@@ -47,5 +49,19 @@ func WithWill(qos message.QoSLevel, retain bool, topic, payload string, property
 			"payload":  payload,
 			"property": property,
 		},
+	}
+}
+
+func WithRetain() ClientOption {
+	return ClientOption{
+		name:  nameRetain,
+		value: true,
+	}
+}
+
+func WithQoS(qos message.QoSLevel) ClientOption {
+	return ClientOption{
+		name:  nameQoS,
+		value: qos,
 	}
 }
