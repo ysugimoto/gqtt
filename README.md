@@ -1,6 +1,6 @@
 # gqtt
 
-`gqtt` is *MQTT5* broker/client implementation by golang.
+*MQTT5* broker/client implementation by golang.
 
 See OASIS's spec: http://docs.oasis-open.org/mqtt/mqtt/v5.0/cs02/mqtt-v5.0-cs02.html
 
@@ -32,19 +32,19 @@ import (
 func main() {
 	server := gqtt.NewBroker(":9999")
 	ctx := context.Background()
-  // Start server inside goroutine
+	// Start server inside goroutine
 	go server.ListenAndServe(ctx)
 
-  // Hooks of messages
+	// Hooks of messages
 	for evt := range server.MessageEvent {
 		switch e := evt.(type) {
     // Client subscribed
 		case *message.Subscribe:
 			log.Println("Received SUBSCRIBE event: ", e.GetType())
-    // Client connected
+		// Client connected
 		case *message.Connect:
 			log.Println("Received CONNECT event", e.GetType())
-    // Client published message
+		// Client published message
 		case *message.Publish:
 			log.Println("Received PUBLISH event", e.GetType())
 		}
@@ -77,13 +77,13 @@ func main() {
 
 	ctx := context.Background()
 
-  // Connect with authenticate
+	// Connect with authenticate
 	auth := gqtt.WithLoginAuth("admin", "admin")
 	if err := client.Connect(ctx, auth); err != nil {
 		log.Fatal(err)
 	}
 
-  // Subscribe topic
+	// Subscribe topic
 	if err := client.Subscribe("gqtt/example", message.QoS2); err != nil {
 		log.Fatal(err)
 	}
@@ -123,10 +123,10 @@ This package now implements partial features. See following checks:
 - [x] Will message
 - [x] Wildcard topics
 - [x] User Property
-- [] Connect redirection
-- [] Request/Response feature
-- [] Auth challenge (now experimental. Only basic/login auth with `admin/admin`)
-- [] Distirbuted brokers
+- [ ] Connect redirection
+- [ ] Request/Response feature
+- [ ] Auth challenge (now experimental. Only basic/login auth with `admin/admin`)
+- [ ] Distirbuted brokers
 
 ## LICENSE
 
@@ -134,7 +134,7 @@ MIT
 
 ## Author
 
-Yoshiaki Sugimoot
+Yoshiaki Sugimoto
 
 
 This package is still under development. PR is welcome :-)
