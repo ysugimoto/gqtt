@@ -154,16 +154,27 @@ func (b *Broker) removeClient(clientId string) {
 	}
 }
 
-func (b *Broker) publish(pb *message.Publish) {
-	clientQoS := b.subscription.GetClientsByTopic(pb.TopicName)
-	if len(clientQoS) == 0 {
+func (b *Broker) Publish(pb *message.Publish) {
+	si := b.subscription.GetClientsByTopic(pb.TopicName)
+	if si == nil {
 		return
 	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	log.Debug("start to send publish packet")
-	for cid, qos := range clientQoS {
+
+	// Save as retain message is RETAIN bit is active
+	if pb.RETAIN {
+		// TODO: persistent save to DB, or some backend
+		log.Debug("Save retian message to topic: ", pb.TopicName)
+		si.RetainMessage = pb
+	}
+	// And we always set retain as set in order to distinguish retained message or not in client.
+	pb.SetRetain(false)
+
+	for cid, qos := range si.Clients {
 		c, ok := clients[cid]
 		if !ok {
 			continue
@@ -207,5 +218,19 @@ func (b *Broker) will(c message.Connect) {
 	if c.WillProperty != nil {
 		pb.Property = c.WillProperty.ToPublish()
 	}
-	b.publish(pb)
+	b.Publish(pb)
+}
+
+func (b *Broker) getRetainMessage(topicName string) *message.Publish {
+	if si := b.subscription.GetClientsByTopic(topicName); si != nil {
+		return si.RetainMessage
+	}
+	return nil
+}
+
+func (b *Broker) deleteRetainMessage(topicName string) {
+	if si := b.subscription.GetClientsByTopic(topicName); si != nil {
+		// TODO: delete from persistent storage
+		si.RetainMessage = nil
+	}
 }

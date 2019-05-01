@@ -10,7 +10,10 @@ import (
 	"github.com/ysugimoto/gqtt/message"
 )
 
-type ClientQoS map[string]message.QoSLevel
+type SubscriptionInfo struct {
+	Clients       map[string]message.QoSLevel
+	RetainMessage *message.Publish
+}
 
 type Subscription struct {
 	topics sync.Map
@@ -24,9 +27,9 @@ func NewSubscription() *Subscription {
 
 func (s *Subscription) UnsubscribeAll(clientId string) {
 	s.topics.Range(func(k, v interface{}) bool {
-		m := v.(ClientQoS)
-		if _, ok := m[clientId]; ok {
-			delete(m, clientId)
+		info := v.(*SubscriptionInfo)
+		if _, ok := info.Clients[clientId]; ok {
+			delete(info.Clients, clientId)
 		}
 		return true
 	})
@@ -37,9 +40,9 @@ func (s *Subscription) Unsubscribe(clientId, topic string) {
 	if !ok {
 		return
 	}
-	m := v.(ClientQoS)
-	if _, ok := m[clientId]; ok {
-		delete(m, clientId)
+	info := v.(*SubscriptionInfo)
+	if _, ok := info.Clients[clientId]; ok {
+		delete(info.Clients, clientId)
 	}
 }
 
@@ -58,15 +61,16 @@ func (s *Subscription) Subscribe(clientId string, t message.SubscribeTopic) (mes
 	}
 
 	for _, topic := range targets {
-		v, ok := s.topics.Load(topic)
-		var m ClientQoS
-		if !ok {
-			m = ClientQoS{}
+		var info *SubscriptionInfo
+		if v, ok := s.topics.Load(topic); ok {
+			info = v.(*SubscriptionInfo)
 		} else {
-			m = v.(ClientQoS)
+			info = &SubscriptionInfo{
+				Clients: make(map[string]message.QoSLevel),
+			}
 		}
-		m[clientId] = t.QoS
-		s.topics.Store(topic, m)
+		info.Clients[clientId] = t.QoS
+		s.topics.Store(topic, info)
 		log.Debugf("client %s subscribed top for %s\n", clientId, topic)
 	}
 
@@ -133,13 +137,11 @@ func (s *Subscription) FindTopics(topic string) ([]string, error) {
 	return topics, nil
 }
 
-func (s *Subscription) GetClientsByTopic(topic string) ClientQoS {
+func (s *Subscription) GetClientsByTopic(topic string) *SubscriptionInfo {
 	log.Debugf("find all clients fot topic: %s\n", topic)
 
-	v, ok := s.topics.Load(topic)
-	if !ok {
-		return ClientQoS{}
+	if v, ok := s.topics.Load(topic); ok {
+		return v.(*SubscriptionInfo)
 	}
-	m := v.(ClientQoS)
-	return m
+	return nil
 }
