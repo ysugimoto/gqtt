@@ -117,7 +117,7 @@ func (b *Broker) handshake(conn net.Conn, timeout time.Duration) (*message.Conne
 		return nil, errors.Wrap(err, "Not Authorized")
 	}
 	reason = message.Success
-	log.Debugf("CONNECT accepted: %+v\n", cn)
+	log.Debugf("CONNECT accepted")
 	b.sendEvent(cn)
 	return cn, nil
 }

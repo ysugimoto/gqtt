@@ -9,8 +9,8 @@ import (
 type Topic = message.SubscribeTopic
 type Option = client.ClientOption
 
-func NewBroker(port int) *broker.Broker {
-	return broker.NewBroker(port)
+func NewBroker(addr string) *broker.Broker {
+	return broker.NewBroker(addr)
 }
 
 func NewClient(url string) *client.Client {
